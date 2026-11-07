@@ -2,8 +2,8 @@ require('dotenv').config();
 
 const config = {
   // Discord Bot
-  token: process.env.DISCORD_TOKEN || '',
-  clientId: process.env.CLIENT_ID || '',
+  token: (process.env.DISCORD_TOKEN || '').trim().replace(/^["']|["']$/g, ''),
+  clientId: (process.env.CLIENT_ID || '').trim().replace(/^["']|["']$/g, ''),
   guildId: process.env.GUILD_ID || '', // Optional: Instant registration for testing
   prefix: process.env.BOT_PREFIX || '!',
   defaultVolume: parseInt(process.env.DEFAULT_VOLUME || '50', 10),

@@ -455,13 +455,19 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
 // -------------------------------------------------------------
 // 5. Lightweight Express Web Server for 24/7 Free Hosting
 // -------------------------------------------------------------
+let loginError = null;
+let isConnected = false;
+
 const app = express();
 
 app.get('/', (req, res) => {
   res.json({
-    status: 'online',
-    name: 'Nobu Music Bot',
-    botTag: client.user ? client.user.tag : 'Connecting...',
+    status: isConnected ? 'online' : (loginError ? 'error' : 'connecting'),
+    discordConnected: isConnected,
+    loginError: loginError,
+    tokenConfigured: Boolean(config.token && config.token.length > 10),
+    tokenLength: config.token ? config.token.length : 0,
+    botTag: client.user ? client.user.tag : (loginError || 'Connecting...'),
     uptimeSeconds: Math.floor(process.uptime()),
     pingMs: client.ws ? Math.round(client.ws.ping) : null,
     guildsCount: client.guilds ? client.guilds.cache.size : 0,
@@ -481,10 +487,18 @@ const server = app.listen(config.port, () => {
 // 6. Login and Graceful Shutdown
 // -------------------------------------------------------------
 if (config.token) {
-  client.login(config.token).catch((err) => {
-    logger.error('Failed to log in to Discord:', err);
-  });
+  logger.info(`Attempting login with token of length ${config.token.length}...`);
+  client.login(config.token)
+    .then(() => {
+      isConnected = true;
+      loginError = null;
+    })
+    .catch((err) => {
+      loginError = err.message || String(err);
+      logger.error('Failed to log in to Discord:', err);
+    });
 } else {
+  loginError = 'DISCORD_TOKEN environment variable is missing or empty in Render';
   logger.warn('DISCORD_TOKEN is not set. Nobu web server is running. Set credentials in .env to connect to Discord.');
 }
 
