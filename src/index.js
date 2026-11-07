@@ -35,6 +35,13 @@ if (!validation.valid) {
 }
 
 // Initialize Discord Client
+const recentLogs = [];
+function addLog(type, msg) {
+  const line = `[${new Date().toISOString().substring(11, 19)}] [${type}] ${msg}`;
+  recentLogs.push(line);
+  if (recentLogs.length > 25) recentLogs.shift();
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -42,6 +49,19 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+});
+
+client.on('debug', (info) => {
+  addLog('DEBUG', info);
+  logger.info(`[Discord Debug] ${info}`);
+});
+client.on('warn', (warning) => {
+  addLog('WARN', warning);
+  logger.warn(`[Discord Warn] ${warning}`);
+});
+client.on('error', (err) => {
+  addLog('ERROR', err.message || String(err));
+  logger.error(`[Discord Error]`, err);
 });
 
 // Configure DisTube plugins
@@ -472,6 +492,7 @@ app.get('/', (req, res) => {
     pingMs: client.ws ? Math.round(client.ws.ping) : null,
     guildsCount: client.guilds ? client.guilds.cache.size : 0,
     timestamp: new Date().toISOString(),
+    recentLogs,
   });
 });
 
