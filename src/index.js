@@ -5,6 +5,8 @@ const {
   EmbedBuilder,
   Events: DiscordEvents,
   ActivityType,
+  REST,
+  Routes,
 } = require('discord.js');
 const { DisTube, Events: DisTubeEvents } = require('distube');
 const { SpotifyPlugin } = require('@distube/spotify');
@@ -227,7 +229,7 @@ distube.on(DisTubeEvents.ERROR, (error, queue, song) => {
 // 3. Discord Client Events & Interactions
 // -------------------------------------------------------------
 
-client.once(DiscordEvents.ClientReady, (c) => {
+client.once(DiscordEvents.ClientReady, async (c) => {
   logger.success(`=============================================`);
   logger.success(` Nobu Music Bot is ONLINE! Logged in as: ${c.user.tag}`);
   logger.success(` Serving ${c.guilds.cache.size} servers and ${client.commands.size} commands`);
@@ -243,6 +245,30 @@ client.once(DiscordEvents.ClientReady, (c) => {
     ],
     status: 'online',
   });
+
+  // Automatically register slash commands with Discord REST API
+  try {
+    const commandsJson = client.commands.map((cmd) => cmd.data.toJSON());
+    const rest = new REST({ version: '10' }).setToken(config.token);
+
+    if (config.guildId) {
+      logger.info(`Auto-registering ${commandsJson.length} slash commands to Guild: ${config.guildId}...`);
+      await rest.put(
+        Routes.applicationGuildCommands(config.clientId, config.guildId),
+        { body: commandsJson }
+      );
+      logger.success('Slash commands registered to testing server!');
+    } else {
+      logger.info(`Auto-registering ${commandsJson.length} global slash commands...`);
+      await rest.put(
+        Routes.applicationCommands(config.clientId),
+        { body: commandsJson }
+      );
+      logger.success('Global slash commands registered successfully with Discord!');
+    }
+  } catch (err) {
+    logger.warn('Slash command auto-registration notice:', err.message);
+  }
 });
 
 // Interaction handler (Slash commands & Interactive Buttons)
