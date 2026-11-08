@@ -97,6 +97,7 @@ const distube = new DisTube(client, {
     path: ffmpegStatic || 'ffmpeg',
   },
   emitNewSongOnly: true,
+  savePreviousSongs: false,
   emitAddSongWhenCreatingQueue: false,
   emitAddListWhenCreatingQueue: false,
   joinNewVoiceChannel: true,
