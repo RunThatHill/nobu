@@ -11,7 +11,7 @@ const {
 const { DisTube, Events: DisTubeEvents } = require('distube');
 const { SpotifyPlugin } = require('@distube/spotify');
 const { SoundCloudPlugin } = require('@distube/soundcloud');
-const { YtDlpPlugin } = require('@distube/yt-dlp');
+const { SafeYtDlpPlugin } = require('./utils/safeYtDlpPlugin');
 const { DirectLinkPlugin } = require('@distube/direct-link');
 const ffmpegStatic = require('ffmpeg-static');
 const express = require('express');
@@ -85,7 +85,7 @@ const plugins = [
       : {}
   ),
   new DirectLinkPlugin(),
-  new YtDlpPlugin({
+  new SafeYtDlpPlugin({
     update: true,
   }),
 ];
