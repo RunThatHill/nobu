@@ -40,16 +40,19 @@ module.exports = {
     }
 
     // Check bot permissions in voice channel
-    const permissions = voiceChannel.permissionsFor(interaction.guild.members.me);
-    if (!permissions.has('Connect') || !permissions.has('Speak')) {
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(config.errorColor)
-            .setDescription('❌ I do not have permission to `Connect` and `Speak` in your voice channel!'),
-        ],
-        ephemeral: true,
-      });
+    const me = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
+    if (me) {
+      const permissions = voiceChannel.permissionsFor(me);
+      if (permissions && (!permissions.has('Connect') || !permissions.has('Speak'))) {
+        return interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(config.errorColor)
+              .setDescription('❌ I do not have permission to `Connect` and `Speak` in your voice channel!'),
+          ],
+          ephemeral: true,
+        });
+      }
     }
 
     let query = interaction.options.getString('query').trim();
