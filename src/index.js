@@ -13,6 +13,7 @@ const { SpotifyPlugin } = require('@distube/spotify');
 const { SoundCloudPlugin } = require('@distube/soundcloud');
 const { YtDlpPlugin } = require('@distube/yt-dlp');
 const { DirectLinkPlugin } = require('@distube/direct-link');
+const ffmpegStatic = require('ffmpeg-static');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -46,6 +47,7 @@ function addLog(type, msg) {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
@@ -91,6 +93,9 @@ const plugins = [
 // Initialize DisTube
 const distube = new DisTube(client, {
   plugins,
+  ffmpeg: {
+    path: ffmpegStatic || 'ffmpeg',
+  },
   emitNewSongOnly: true,
   emitAddSongWhenCreatingQueue: false,
   emitAddListWhenCreatingQueue: false,
@@ -244,6 +249,11 @@ distube.on(DisTubeEvents.ERROR, (error, queue, song) => {
       .setDescription(`An error occurred while playing: \`${error.message || 'Stream extraction failed'}\`\n\n*Tip: If YouTube links fail due to datacenter IP blocks, try searching SoundCloud or Spotify instead!*`);
     queue.textChannel.send({ embeds: [embed] }).catch(() => {});
   }
+});
+
+// FFMPEG Debug (optional diagnostic)
+distube.on(DisTubeEvents.FFMPEG_DEBUG, (debug) => {
+  logger.info(`[FFMPEG Debug] ${debug}`);
 });
 
 // -------------------------------------------------------------
