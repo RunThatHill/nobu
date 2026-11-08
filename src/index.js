@@ -450,9 +450,13 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
     if (!voiceChannel) {
       return message.reply('❌ You must be in a voice channel to use Nobu!');
     }
-    const query = args.join(' ');
+    let query = args.join(' ');
     if (!query) {
       return message.reply('⚠️ Please provide a song name or link! (e.g. `!play lofi beats`)');
+    }
+
+    if (!query.startsWith('http://') && !query.startsWith('https://') && !query.startsWith('scsearch:') && !query.startsWith('ytsearch:')) {
+      query = `scsearch:${query}`;
     }
 
     try {

@@ -58,11 +58,14 @@ module.exports = {
     let query = interaction.options.getString('query').trim();
     const source = interaction.options.getString('source') || 'auto';
 
-    // If user explicitly chose soundcloud and query is not a URL, prefix it or search soundcloud
-    if (source === 'soundcloud' && !query.startsWith('http://') && !query.startsWith('https://')) {
-      query = `scsearch:${query}`;
-    } else if (source === 'youtube' && !query.startsWith('http://') && !query.startsWith('https://')) {
-      query = `ytsearch:${query}`;
+    // If not a direct URL, route query to search provider.
+    // Default 'auto' to SoundCloud (scsearch) because YouTube triggers anti-bot walls on cloud IPs.
+    if (!query.startsWith('http://') && !query.startsWith('https://')) {
+      if (source === 'youtube') {
+        query = `ytsearch:${query}`;
+      } else {
+        query = `scsearch:${query}`;
+      }
     }
 
     await interaction.deferReply();
