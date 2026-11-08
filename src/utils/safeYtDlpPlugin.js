@@ -7,8 +7,15 @@ const logger = require('./logger');
 const isWindows = process.platform === 'win32';
 const ytdlpBin = path.resolve(__dirname, '../../node_modules/@distube/yt-dlp/bin', isWindows ? 'yt-dlp.exe' : 'yt-dlp');
 
+// Ensure executable permissions on Linux/macOS
+if (!isWindows && fs.existsSync(ytdlpBin)) {
+  try {
+    fs.chmodSync(ytdlpBin, 0o755);
+  } catch (_) {}
+}
+
 /**
- * Spawns yt-dlp cleanly without concatenating stderr into JSON output
+ * Spawns yt-dlp cleanly without mixing stderr into JSON stdout
  */
 function cleanJson(url, extraFlags = []) {
   const flags = [
@@ -87,11 +94,20 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
       if (options.update !== false) {
         download().catch(() => {});
       }
-    } catch (e) {}
+    } catch (_) {}
   }
 
-  validate() {
-    return true;
+  /**
+   * Only validate direct YouTube URLs or explicit ytsearch: queries.
+   * This allows SoundCloud to handle normal text search queries cleanly.
+   */
+  validate(url) {
+    if (typeof url !== 'string') return false;
+    return (
+      url.includes('youtube.com') ||
+      url.includes('youtu.be') ||
+      url.startsWith('ytsearch:')
+    );
   }
 
   async resolve(url, options) {
@@ -119,12 +135,37 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
     if (!song.url) {
       throw new DisTubeError('YTDLP_PLUGIN_INVALID_SONG', 'Cannot get stream url from invalid song.');
     }
-    logger.info(`Extracting direct stream URL for: ${song.name}`);
-    const info = await cleanJson(song.url, ['-f', 'ba/ba*']);
-    if (!info.url) {
-      throw new DisTubeError('YTDLP_NO_STREAM', 'No direct stream URL returned by yt-dlp');
+
+    logger.info(`Extracting audio stream for: "${song.name}"`);
+
+    // 1. Attempt direct YouTube stream extraction
+    try {
+      const info = await cleanJson(song.url, ['-f', 'ba/ba*']);
+      if (info && info.url) {
+        return info.url;
+      }
+    } catch (err) {
+      logger.warn(`[SafeYtDlp] Direct YouTube extraction failed (${err.message}). Attempting SoundCloud audio fallback...`);
     }
-    return info.url;
+
+    // 2. Seamless Fallback: Search SoundCloud for the song title if YouTube blocked the cloud IP
+    const scPlugin = this.distube?.plugins?.find((p) => p.constructor.name === 'SoundCloudPlugin');
+    if (scPlugin) {
+      try {
+        const scResults = await scPlugin.search(song.name, 'track', 1);
+        if (scResults && scResults[0]?.url) {
+          const scUrl = await scPlugin.getStreamURL(scResults[0]);
+          if (scUrl) {
+            logger.info(`[SafeYtDlp] Successfully resolved SoundCloud audio fallback for: "${song.name}"`);
+            return scUrl;
+          }
+        }
+      } catch (scErr) {
+        logger.error(`[SafeYtDlp] SoundCloud fallback failed: ${scErr.message}`);
+      }
+    }
+
+    throw new DisTubeError('YTDLP_NO_STREAM', `Could not extract audio stream for "${song.name}". YouTube may be blocking datacenter IP requests.`);
   }
 
   getRelatedSongs() {

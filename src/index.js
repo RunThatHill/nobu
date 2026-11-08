@@ -1,3 +1,7 @@
+try {
+  require('v8').setFlagsFromString('--max_old_space_size=65');
+} catch (_) {}
+
 const {
   Client,
   GatewayIntentBits,
@@ -90,11 +94,33 @@ const plugins = [
   }),
 ];
 
+// Resolve and verify FFmpeg binary
+let ffmpegPath = 'ffmpeg';
+try {
+  if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
+    try {
+      fs.chmodSync(ffmpegStatic, 0o755);
+    } catch (_) {}
+    ffmpegPath = ffmpegStatic;
+  }
+} catch (_) {
+  ffmpegPath = 'ffmpeg';
+}
+
 // Initialize DisTube
 const distube = new DisTube(client, {
   plugins,
   ffmpeg: {
-    path: ffmpegStatic || 'ffmpeg',
+    path: ffmpegPath,
+    args: {
+      global: {
+        loglevel: 'warning',
+      },
+      input: {
+        user_agent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      },
+    },
   },
   emitNewSongOnly: true,
   savePreviousSongs: false,
@@ -455,8 +481,16 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
       return message.reply('⚠️ Please provide a song name or link! (e.g. `!play lofi beats`)');
     }
 
-    if (!query.startsWith('http://') && !query.startsWith('https://') && !query.startsWith('scsearch:') && !query.startsWith('ytsearch:')) {
-      query = `scsearch:${query}`;
+    if (!query.startsWith('http://') && !query.startsWith('https://')) {
+      const scPlugin = distube.plugins.find((p) => p.constructor.name === 'SoundCloudPlugin');
+      if (scPlugin) {
+        try {
+          const results = await scPlugin.search(query, 'track', 1);
+          if (results && results.length > 0 && results[0]?.url) {
+            query = results[0].url;
+          }
+        } catch (_) {}
+      }
     }
 
     try {
