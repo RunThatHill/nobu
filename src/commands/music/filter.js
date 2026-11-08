@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require('../../config');
+const { getMemberVoiceChannel } = require('../../utils/voiceUtils');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -32,7 +33,8 @@ module.exports = {
       });
     }
 
-    if (!interaction.member.voice.channel || interaction.member.voice.channel.id !== queue.voiceChannel?.id) {
+    const memberVoice = await getMemberVoiceChannel(interaction);
+    if (!memberVoice || memberVoice.id !== queue.voiceChannel?.id) {
       return interaction.reply({
         embeds: [new EmbedBuilder().setColor(config.errorColor).setDescription('❌ You must be in the same voice channel as Nobu!')],
         ephemeral: true,

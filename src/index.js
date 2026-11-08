@@ -23,6 +23,7 @@ const {
   createNowPlayingEmbed,
   createPlayerControls,
 } = require('./utils/playerUi');
+const { getMemberVoiceChannel } = require('./utils/voiceUtils');
 
 // Validate environment variables
 const validation = validateConfig();
@@ -326,7 +327,7 @@ client.on(DiscordEvents.InteractionCreate, async (interaction) => {
       });
     }
 
-    const memberVoice = interaction.member?.voice?.channel;
+    const memberVoice = await getMemberVoiceChannel(interaction);
     if (!memberVoice || memberVoice.id !== queue.voiceChannel?.id) {
       return interaction.reply({
         content: '❌ You must be in the same voice channel as Nobu to use player controls!',
@@ -432,7 +433,7 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
   const args = message.content.slice(config.prefix.length).trim().split(/ +/);
   const commandName = args.shift().toLowerCase();
 
-  const voiceChannel = message.member?.voice?.channel;
+  const voiceChannel = await getMemberVoiceChannel(message);
 
   if (commandName === 'play' || commandName === 'p') {
     if (!voiceChannel) {

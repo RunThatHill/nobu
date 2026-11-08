@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require('../../config');
+const { getMemberVoiceChannel } = require('../../utils/voiceUtils');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -25,7 +26,7 @@ module.exports = {
     ),
 
   async execute(interaction, client) {
-    const voiceChannel = interaction.member?.voice?.channel;
+    const voiceChannel = await getMemberVoiceChannel(interaction);
 
     if (!voiceChannel) {
       return interaction.reply({
