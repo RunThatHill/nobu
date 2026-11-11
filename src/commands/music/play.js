@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require('../../config');
 const { getMemberVoiceChannel } = require('../../utils/voiceUtils');
+const { findPlayableSoundCloudTrack } = require('../../utils/soundcloudUtils');
 const logger = require('../../utils/logger');
 
 module.exports = {
@@ -66,15 +67,15 @@ module.exports = {
       if (source === 'youtube') {
         query = `ytsearch:${query}`;
       } else {
-        // Auto / SoundCloud: Resolve query via SoundCloud for 100% reliable cloud streaming
+        // Auto / SoundCloud: Resolve query via SoundCloud, avoiding /cbcs/ DRM & 30s previews
         const scPlugin = client.distube.plugins.find((p) => p.constructor.name === 'SoundCloudPlugin');
         if (scPlugin) {
           try {
             logger.info(`[Play] Searching SoundCloud for: "${query}"`);
-            const results = await scPlugin.search(query, 'track', 1);
-            if (results && results.length > 0 && results[0]?.url) {
-              query = results[0].url;
-              logger.info(`[Play] Resolved to SoundCloud track: ${query}`);
+            const found = await findPlayableSoundCloudTrack(scPlugin, query);
+            if (found?.song?.url) {
+              query = found.song.url;
+              logger.info(`[Play] Resolved to playable SoundCloud track: ${query}`);
             }
           } catch (e) {
             logger.warn(`[Play] SoundCloud resolution warning: ${e.message}`);

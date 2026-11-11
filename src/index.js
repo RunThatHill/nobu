@@ -28,6 +28,7 @@ const {
 } = require('./utils/playerUi');
 const { getMemberVoiceChannel } = require('./utils/voiceUtils');
 const { OggOpusStream } = require('./utils/oggOpusStream');
+const { enhanceSoundCloudPlugin, findPlayableSoundCloudTrack } = require('./utils/soundcloudUtils');
 
 // Validate environment variables
 const validation = validateConfig();
@@ -81,6 +82,16 @@ client.on('error', (err) => {
 });
 
 // Configure DisTube plugins
+const scPlugin = new SoundCloudPlugin(
+  config.soundcloud.clientId
+    ? { clientId: config.soundcloud.clientId }
+    : {}
+);
+const ytPlugin = new SafeYtDlpPlugin({
+  update: false,
+});
+enhanceSoundCloudPlugin(scPlugin, () => ytPlugin);
+
 const plugins = [
   new SpotifyPlugin(
     config.spotify.clientId && config.spotify.clientSecret
@@ -92,15 +103,9 @@ const plugins = [
         }
       : {}
   ),
-  new SoundCloudPlugin(
-    config.soundcloud.clientId
-      ? { clientId: config.soundcloud.clientId }
-      : {}
-  ),
+  scPlugin,
   new DirectLinkPlugin(),
-  new SafeYtDlpPlugin({
-    update: false,
-  }),
+  ytPlugin,
 ];
 
 function binaryHasLibopus(bin) {
@@ -350,6 +355,7 @@ distube.on(DisTubeEvents.PLAY_SONG, async (queue, song) => {
   diag.songDuration = song.duration || 0;
   diag.source = song.source || 'unknown';
   diag.startedAt = Date.now();
+  diag.voiceEvents = [];
   diag.audioError = null;
   diag.prematureEndReported = false;
 
@@ -751,15 +757,12 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
     }
 
     if (!query.startsWith('http://') && !query.startsWith('https://')) {
-      const scPlugin = distube.plugins.find((p) => p.constructor.name === 'SoundCloudPlugin');
-      if (scPlugin) {
-        try {
-          const results = await scPlugin.search(query, 'track', 1);
-          if (results && results.length > 0 && results[0]?.url) {
-            query = results[0].url;
-          }
-        } catch (_) {}
-      }
+      try {
+        const found = await findPlayableSoundCloudTrack(scPlugin, query);
+        if (found?.song?.url) {
+          query = found.song.url;
+        }
+      } catch (_) {}
     }
 
     try {
