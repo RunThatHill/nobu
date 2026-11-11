@@ -83,6 +83,12 @@ module.exports = {
       }
     }
 
+    if (typeof global.gc === 'function') {
+      try {
+        global.gc();
+      } catch (_) {}
+    }
+
     try {
       await client.distube.play(voiceChannel, query, {
         textChannel: interaction.channel,

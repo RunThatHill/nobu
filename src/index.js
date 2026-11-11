@@ -9,14 +9,14 @@ const {
   REST,
   Routes,
 } = require('discord.js');
-const { DisTube, Events: DisTubeEvents } = require('distube');
+const { DisTube, DisTubeError, Events: DisTubeEvents } = require('distube');
 const { SpotifyPlugin } = require('@distube/spotify');
 const { SoundCloudPlugin } = require('@distube/soundcloud');
 const { SafeYtDlpPlugin } = require('./utils/safeYtDlpPlugin');
 const { DirectLinkPlugin } = require('@distube/direct-link');
 const { spawnSync } = require('child_process');
 const ffmpegStatic = require('ffmpeg-static');
-const express = require('express');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
@@ -27,6 +27,7 @@ const {
   createPlayerControls,
 } = require('./utils/playerUi');
 const { getMemberVoiceChannel } = require('./utils/voiceUtils');
+const { OggOpusStream } = require('./utils/oggOpusStream');
 
 // Validate environment variables
 const validation = validateConfig();
@@ -102,18 +103,30 @@ const plugins = [
   }),
 ];
 
+function binaryHasLibopus(bin) {
+  try {
+    const check = spawnSync(bin, ['-hide_banner', '-encoders'], {
+      windowsHide: true,
+      encoding: 'utf8',
+    });
+    return !check.error && check.status === 0 && (check.stdout || '').includes('libopus');
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * Prefer lightweight system ffmpeg (e.g., via apt on Linux/Discloud),
  * falling back to ffmpeg-static (Windows / local environments).
  */
-function resolveFfmpegPath() {
+function resolveFfmpegInfo() {
   try {
     const sysCheck = spawnSync('ffmpeg', ['-version'], {
       windowsHide: true,
       encoding: 'utf8',
     });
     if (!sysCheck.error && sysCheck.status === 0) {
-      return 'ffmpeg';
+      return { path: 'ffmpeg', hasLibopus: binaryHasLibopus('ffmpeg') };
     }
   } catch (_) {}
 
@@ -122,15 +135,16 @@ function resolveFfmpegPath() {
       try {
         fs.chmodSync(ffmpegStatic, 0o755);
       } catch (_) {}
-      return ffmpegStatic;
+      return { path: ffmpegStatic, hasLibopus: binaryHasLibopus(ffmpegStatic) };
     }
   } catch (_) {}
 
-  return 'ffmpeg';
+  return { path: 'ffmpeg', hasLibopus: false };
 }
 
-const ffmpegPath = resolveFfmpegPath();
-logger.info(`Using FFmpeg binary: ${ffmpegPath}`);
+const ffmpegInfo = resolveFfmpegInfo();
+const ffmpegPath = ffmpegInfo.path;
+logger.info(`Using FFmpeg binary: ${ffmpegPath} (libopus=${ffmpegInfo.hasLibopus})`);
 
 // Initialize DisTube
 const distube = new DisTube(client, {
@@ -154,6 +168,76 @@ const distube = new DisTube(client, {
   emitAddListWhenCreatingQueue: false,
   joinNewVoiceChannel: true,
 });
+
+// Route DisTube playback through OggOpusStream when FFmpeg supports libopus
+// to skip opusscript WASM and JS VolumeTransformer (~20-30 MB RSS reduction).
+if (ffmpegInfo.hasLibopus) {
+  const queues = distube.queues;
+  queues.playSong = async function lowRamPlaySong(queue, emitPlaySong = true) {
+    if (!queue) return;
+    if (queue.stopped || !queue.songs.length) {
+      await queue.stop();
+      return;
+    }
+    try {
+      const song = queue.songs[0];
+      queues.debug(`[${queue.id}] Getting stream from: ${song}`);
+      await queues.handler.attachStreamInfo(song);
+      const willPlaySong = song.stream.playFromSource ? song : song.stream.song;
+      const stream = willPlaySong?.stream;
+      if (!willPlaySong || !stream?.playFromSource || !stream.url) {
+        throw new DisTubeError('NO_STREAM_URL', `${song}`);
+      }
+
+      if (typeof global.gc === 'function') {
+        try {
+          global.gc();
+        } catch (_) {}
+      }
+
+      queues.debug(`[${queue.id}] Creating OggOpusStream for: ${willPlaySong}`);
+      const streamOptions = {
+        ffmpeg: {
+          path: queues.options.ffmpeg.path,
+          args: {
+            global: { ...queue.ffmpegArgs.global },
+            input: { ...queue.ffmpegArgs.input },
+            output: { ...queue.ffmpegArgs.output, ...queue.filters.ffmpegArgs },
+          },
+        },
+        seek: willPlaySong.duration ? queue._beginTime : 0,
+        volumePercent: queue.volume,
+        onVolumeChange: () => {
+          setImmediate(() => {
+            if (!queue.stopped && queue.songs.length > 0) {
+              queue.seek(queue.currentTime || 0).catch(() => {});
+            }
+          });
+        },
+      };
+      queue._beginTime = 0;
+
+      const dtStream = new OggOpusStream(stream.url, streamOptions);
+      dtStream.on('debug', (data) => distube.emit(DisTubeEvents.FFMPEG_DEBUG, `[${queue.id}] ${data}`));
+      queues.debug(`[${queue.id}] Started playing: ${willPlaySong}`);
+      await queue.voice.play(dtStream);
+      if (emitPlaySong) distube.emit(DisTubeEvents.PLAY_SONG, queue, song);
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      const failedSong = queue.songs.shift();
+      try {
+        error.name = 'PlayingError';
+      } catch (_) {}
+      queues.debug(`[${queue.id}] Error while playing: ${error.stack || error.message}`);
+      queues.emitError(error, queue, failedSong);
+      if (queue.songs.length > 0) {
+        await queues.playSong(queue);
+      } else {
+        await queue.stop();
+      }
+    }
+  };
+}
 
 client.distube = distube;
 client.commands = new Collection();
@@ -708,43 +792,46 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
 });
 
 // -------------------------------------------------------------
-// 5. Lightweight Express Web Server for 24/7 Free Hosting
+// 5. Lightweight Built-in HTTP Health Server (~0 MB extra RAM)
 // -------------------------------------------------------------
 let loginError = null;
 let isConnected = false;
 
-const app = express();
+const server = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    return res.end('OK');
+  }
 
-app.get('/', (req, res) => {
   const mem = process.memoryUsage();
-  res.json({
-    status: isConnected ? 'online' : (loginError ? 'error' : 'connecting'),
-    discordConnected: isConnected,
-    loginError: loginError,
-    tokenConfigured: Boolean(config.token && config.token.length > 10),
-    tokenLength: config.token ? config.token.length : 0,
-    botTag: client.user ? client.user.tag : (loginError || 'Connecting...'),
-    uptimeSeconds: Math.floor(process.uptime()),
-    pingMs: client.ws ? Math.round(client.ws.ping) : null,
-    guildsCount: client.guilds ? client.guilds.cache.size : 0,
-    memoryMB: {
-      rss: Number((mem.rss / 1024 / 1024).toFixed(1)),
-      heapUsed: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
-      heapTotal: Number((mem.heapTotal / 1024 / 1024).toFixed(1)),
-    },
-    ffmpegPath,
-    timestamp: new Date().toISOString(),
-    diagnostics: Object.fromEntries(playbackDiagnostics),
-    recentLogs,
-  });
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(
+    JSON.stringify({
+      status: isConnected ? 'online' : loginError ? 'error' : 'connecting',
+      discordConnected: isConnected,
+      loginError,
+      tokenConfigured: Boolean(config.token && config.token.length > 10),
+      tokenLength: config.token ? config.token.length : 0,
+      botTag: client.user ? client.user.tag : loginError || 'Connecting...',
+      uptimeSeconds: Math.floor(process.uptime()),
+      pingMs: client.ws ? Math.round(client.ws.ping) : null,
+      guildsCount: client.guilds ? client.guilds.cache.size : 0,
+      memoryMB: {
+        rss: Number((mem.rss / 1024 / 1024).toFixed(1)),
+        heapUsed: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
+        heapTotal: Number((mem.heapTotal / 1024 / 1024).toFixed(1)),
+      },
+      ffmpegPath,
+      libopus: ffmpegInfo.hasLibopus,
+      timestamp: new Date().toISOString(),
+      diagnostics: Object.fromEntries(playbackDiagnostics),
+      recentLogs,
+    })
+  );
 });
 
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
-});
-
-const server = app.listen(config.port, () => {
-  logger.info(`Nobu keep-alive web server is listening on port ${config.port}`);
+server.listen(config.port, () => {
+  logger.info(`Nobu keep-alive HTTP server is listening on port ${config.port}`);
 });
 
 // -------------------------------------------------------------
