@@ -28,7 +28,7 @@ const {
 } = require('./utils/playerUi');
 const { getMemberVoiceChannel } = require('./utils/voiceUtils');
 const { OggOpusStream } = require('./utils/oggOpusStream');
-const { enhanceSoundCloudPlugin, findPlayableSoundCloudTrack } = require('./utils/soundcloudUtils');
+const { enhanceSoundCloudPlugin, findPlayableSoundCloudTrack, resolveSpotifyTrackStream } = require('./utils/soundcloudUtils');
 
 // Validate environment variables
 const validation = validateConfig();
@@ -187,6 +187,12 @@ if (ffmpegInfo.hasLibopus) {
     try {
       const song = queue.songs[0];
       queues.debug(`[${queue.id}] Getting stream from: ${song}`);
+      if (!song.stream.playFromSource && !song.stream.song?.stream?.url) {
+        const matched = await resolveSpotifyTrackStream(song, scPlugin, ytPlugin);
+        if (matched) {
+          song.stream.song = matched;
+        }
+      }
       await queues.handler.attachStreamInfo(song);
       const willPlaySong = song.stream.playFromSource ? song : song.stream.song;
       const stream = willPlaySong?.stream;

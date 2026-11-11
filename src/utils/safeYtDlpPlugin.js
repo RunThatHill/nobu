@@ -17,7 +17,7 @@ if (!isWindows && fs.existsSync(ytdlpBin)) {
 /**
  * Spawns yt-dlp cleanly without mixing stderr into JSON stdout
  */
-function cleanJson(url, extraFlags = []) {
+function cleanJson(url, extraFlags = [], timeoutMs = 12000) {
   const flags = [
     url,
     '--dump-single-json',
@@ -30,10 +30,20 @@ function cleanJson(url, extraFlags = []) {
 
   return new Promise((resolve, reject) => {
     const binPath = fs.existsSync(ytdlpBin) ? ytdlpBin : 'yt-dlp';
-    const proc = spawn(binPath, flags);
+    const proc = spawn(binPath, flags, { windowsHide: true });
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        proc.kill('SIGKILL');
+      } catch (_) {}
+      reject(new Error('yt-dlp extraction timed out'));
+    }, timeoutMs);
 
     proc.stdout.on('data', (chunk) => {
       stdout += chunk;
@@ -44,6 +54,9 @@ function cleanJson(url, extraFlags = []) {
     });
 
     proc.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (code === 0 && stdout.trim()) {
         try {
           const data = JSON.parse(stdout);
@@ -57,6 +70,9 @@ function cleanJson(url, extraFlags = []) {
     });
 
     proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       reject(new Error(`Failed to spawn yt-dlp (${binPath}): ${err.message}`));
     });
   });
@@ -131,6 +147,19 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
     return new SafeYtDlpSong(this, info, options);
   }
 
+  async getDirectYouTubeStream(queryOrUrl) {
+    const info = await cleanJson(queryOrUrl, ['-f', 'ba/ba*']);
+    const entry = Array.isArray(info?.entries) ? info.entries[0] : info;
+    if (entry && entry.url) {
+      return {
+        url: entry.url,
+        title: entry.title || queryOrUrl,
+        duration: entry.duration || 0,
+      };
+    }
+    return null;
+  }
+
   async getStreamURL(song) {
     if (!song.url) {
       throw new DisTubeError('YTDLP_PLUGIN_INVALID_SONG', 'Cannot get stream url from invalid song.');
@@ -140,9 +169,9 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
 
     // 1. Attempt direct YouTube stream extraction
     try {
-      const info = await cleanJson(song.url, ['-f', 'ba/ba*']);
-      if (info && info.url) {
-        return info.url;
+      const direct = await this.getDirectYouTubeStream(song.url);
+      if (direct?.url) {
+        return direct.url;
       }
     } catch (err) {
       logger.warn(`[SafeYtDlp] Direct YouTube extraction failed (${err.message}). Attempting SoundCloud audio fallback...`);
@@ -152,9 +181,9 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
     const scPlugin = this.distube?.plugins?.find((p) => p.constructor.name === 'SoundCloudPlugin');
     if (scPlugin) {
       try {
-        const scResults = await scPlugin.search(song.name, 'track', 1);
-        if (scResults && scResults[0]?.url) {
-          const scUrl = await scPlugin.getStreamURL(scResults[0]);
+        const scSong = await scPlugin.searchSong(song.name);
+        if (scSong) {
+          const scUrl = await scPlugin.getStreamURL(scSong);
           if (scUrl) {
             logger.info(`[SafeYtDlp] Successfully resolved SoundCloud audio fallback for: "${song.name}"`);
             return scUrl;

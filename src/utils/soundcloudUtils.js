@@ -1,8 +1,38 @@
-const { DisTubeError } = require('distube');
+const { DisTubeError, Song } = require('distube');
 const logger = require('./logger');
 
 // Short-lived cache (30s) to avoid redundant SoundCloud API calls between search and play
 const streamUrlCache = new Map();
+
+const VARIANT_TERMS = [
+  'remix',
+  'slowed',
+  'reverb',
+  'reverbed',
+  'sped up',
+  'speed up',
+  'nightcore',
+  'cover',
+  'remake',
+  'bootleg',
+  'mashup',
+  'jersey club',
+  '8d',
+  'karaoke',
+  'instrumental',
+  'edit',
+  'flip',
+  'loop',
+  'live',
+  'acoustic',
+  'type beat',
+  'chopnotslop',
+];
+
+function containsWordOrPhrase(haystackLower, term) {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(haystackLower);
+}
 
 function cacheStreamUrl(trackUrl, streamUrl) {
   if (!trackUrl || !streamUrl) return;
@@ -27,6 +57,66 @@ function isPlayableStreamUrl(url) {
     url.startsWith('http') &&
     !url.includes('/cbcs/')
   );
+}
+
+function scoreSoundCloudCandidate(candidate, query, meta = {}) {
+  const titleLower = (candidate?.name || '').toLowerCase();
+  const uploaderLower = (candidate?.uploader?.name || '').toLowerCase();
+  const queryLower = (query || '').toLowerCase();
+  const expectedDuration = Number(meta.expectedDuration || 0);
+  const artistLower = (meta.artistName || '').split(',')[0].trim().toLowerCase();
+  const duration = Number(candidate?.duration || 0);
+
+  let score = 0;
+  let isVariant = false;
+
+  // Penalize remixes, covers, slowed, sped-up, loops unless explicitly requested in query
+  for (const term of VARIANT_TERMS) {
+    if (containsWordOrPhrase(titleLower, term) && !containsWordOrPhrase(queryLower, term)) {
+      isVariant = true;
+      score -= 1000;
+      break;
+    }
+  }
+  if (!isVariant && titleLower.includes(' x ') && !queryLower.includes(' x ')) {
+    isVariant = true;
+    score -= 800;
+  }
+
+  // Filter 30s Go+ previews and match Spotify duration when known
+  if (duration > 0 && duration <= 45 && (expectedDuration === 0 || expectedDuration > 55)) {
+    score -= 5000;
+  } else if (expectedDuration > 45 && duration > 0) {
+    const diff = Math.abs(duration - expectedDuration);
+    if (diff <= 8) score += 150;
+    else if (diff <= 20) score += 90;
+    else if (diff <= 40) score += 25;
+    else if (diff > 60) score -= 350;
+  }
+
+  // Reward artist & title alignment
+  if (artistLower && artistLower.length >= 2) {
+    if (uploaderLower.includes(artistLower) || titleLower.includes(artistLower)) {
+      score += 50;
+    }
+  }
+
+  const queryTokens = queryLower
+    .split(/[^a-z0-9\u0600-\u06FF]+/u)
+    .filter((tok) => tok.length >= 2);
+  for (const tok of queryTokens) {
+    if (titleLower.includes(tok) || uploaderLower.includes(tok)) {
+      score += 6;
+    }
+  }
+
+  const exactDuration = expectedDuration > 45 ? Math.abs(duration - expectedDuration) <= 25 : duration > 45;
+  return {
+    song: candidate,
+    score,
+    isVariant,
+    isExactMatch: !isVariant && exactDuration,
+  };
 }
 
 /**
@@ -75,38 +165,118 @@ async function getUnencryptedStreamForTrack(scPlugin, trackUrl) {
 }
 
 /**
- * Searches SoundCloud for up to 5 tracks and returns the first candidate
- * with an unencrypted, FFmpeg-playable audio stream (preferring full tracks > 45s).
+ * Searches SoundCloud for up to 10 tracks, ranks original/duration-matched tracks
+ * above remixes/covers/30s previews, and returns the best playable unencrypted stream.
  */
-async function findPlayableSoundCloudTrack(scPlugin, query, options = {}, excludeUrl = null) {
+async function findPlayableSoundCloudTrack(scPlugin, query, options = {}, meta = {}) {
   let candidates;
   try {
-    candidates = await scPlugin.search(query, 'track', 5, options);
-  } catch (err) {
+    candidates = await scPlugin.search(query, 'track', 10, options);
+  } catch (_) {
     return null;
   }
 
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
 
-  const filtered = candidates.filter((c) => c?.url && c.url !== excludeUrl);
-  const fullTracks = filtered.filter((c) => (c.duration || 0) > 45);
-  const shortTracks = filtered.filter((c) => (c.duration || 0) <= 45);
-  const ordered = [...fullTracks, ...shortTracks];
+  const excludeUrl = meta.excludeUrl || null;
+  const scored = candidates
+    .filter((c) => c?.url && c.url !== excludeUrl)
+    .map((c) => scoreSoundCloudCandidate(c, query, meta))
+    .sort((a, b) => b.score - a.score);
 
-  for (const candidate of ordered) {
-    const streamUrl = await getUnencryptedStreamForTrack(scPlugin, candidate.url);
+  for (const item of scored) {
+    const streamUrl = await getUnencryptedStreamForTrack(scPlugin, item.song.url);
     if (streamUrl) {
-      cacheStreamUrl(candidate.url, streamUrl);
-      return { song: candidate, streamUrl };
+      cacheStreamUrl(item.song.url, streamUrl);
+      return {
+        song: item.song,
+        streamUrl,
+        isVariant: item.isVariant,
+        isExactMatch: item.isExactMatch,
+      };
     }
   }
 
   return null;
 }
 
+function buildResolvedSong(plugin, source, info, streamUrl, options) {
+  const resolved = new Song(
+    {
+      plugin,
+      source,
+      playFromSource: true,
+      id: info.id,
+      name: info.name,
+      url: info.url,
+      duration: info.duration,
+    },
+    options
+  );
+  resolved.stream.url = streamUrl;
+  return resolved;
+}
+
 /**
- * Enhances SoundCloudPlugin to avoid DRM (/cbcs/) streams, 30s Go+ previews,
- * and seamlessly fall back to another upload or YouTube if a track is DRM-locked.
+ * Resolves a Spotify/InfoExtractor track to an original unencrypted stream:
+ * 1) Prefers an exact (non-remix, duration-matched) SoundCloud upload.
+ * 2) If SoundCloud only has remixes or 30s Go+ previews, tries YouTube official audio first.
+ * 3) Falls back to best SoundCloud candidate if YouTube blocks the cloud IP.
+ */
+async function resolveSpotifyTrackStream(song, scPlugin, ytPlugin) {
+  const artistName = song?.uploader?.name || '';
+  const query = `${song.name} ${artistName}`.trim();
+  const songOptions = { member: song.member, metadata: song.metadata };
+  const meta = {
+    expectedDuration: song.duration || 0,
+    artistName,
+  };
+
+  let scFound = null;
+  if (scPlugin) {
+    scFound = await findPlayableSoundCloudTrack(scPlugin, query, {}, meta);
+    if (scFound?.isExactMatch && scFound.streamUrl) {
+      logger.info(`[Spotify->SC] Exact original match for "${song.name}": "${scFound.song.name}" (${Math.round(scFound.song.duration)}s)`);
+      return buildResolvedSong(scPlugin, 'soundcloud', scFound.song, scFound.streamUrl, songOptions);
+    }
+  }
+
+  // SoundCloud had only remixes, Go+ 30s previews, or duration mismatches -> try YouTube original
+  if (ytPlugin && typeof ytPlugin.getDirectYouTubeStream === 'function') {
+    try {
+      logger.info(`[Spotify->YT] SoundCloud lacked exact non-remix match for "${song.name}". Trying YouTube original audio...`);
+      const ytDirect = await ytPlugin.getDirectYouTubeStream(`ytsearch:${query} official audio`);
+      if (ytDirect?.url) {
+        logger.info(`[Spotify->YT] Resolved YouTube original for "${song.name}": "${ytDirect.title}"`);
+        return buildResolvedSong(
+          ytPlugin,
+          'youtube',
+          {
+            id: song.id,
+            name: ytDirect.title || song.name,
+            url: song.url,
+            duration: ytDirect.duration || song.duration,
+          },
+          ytDirect.url,
+          songOptions
+        );
+      }
+    } catch (ytErr) {
+      logger.warn(`[Spotify->YT] YouTube lookup failed (${ytErr.message}). Falling back to best SoundCloud match.`);
+    }
+  }
+
+  if (scFound?.song && scFound.streamUrl) {
+    logger.warn(`[Spotify->SC Fallback] Using closest SoundCloud track for "${song.name}": "${scFound.song.name}" (variant=${scFound.isVariant})`);
+    return buildResolvedSong(scPlugin, 'soundcloud', scFound.song, scFound.streamUrl, songOptions);
+  }
+
+  return null;
+}
+
+/**
+ * Enhances SoundCloudPlugin to avoid DRM (/cbcs/) streams, remixes, and 30s Go+ previews,
+ * falling back to unencrypted uploads or YouTube if a track is DRM-locked.
  */
 function enhanceSoundCloudPlugin(scPlugin, getFallbackPlugin) {
   if (!scPlugin || scPlugin.__nobuEnhanced) return scPlugin;
@@ -134,7 +304,10 @@ function enhanceSoundCloudPlugin(scPlugin, getFallbackPlugin) {
     // Fallback 1: Find another unencrypted SoundCloud upload of the same song title
     if (song.name) {
       logger.warn(`[SoundCloud] "${song.name}" had only DRM/unplayable streams. Searching unencrypted SoundCloud alternative...`);
-      const alt = await findPlayableSoundCloudTrack(scPlugin, song.name, {}, song.url);
+      const alt = await findPlayableSoundCloudTrack(scPlugin, song.name, {}, {
+        excludeUrl: song.url,
+        expectedDuration: song.duration || 0,
+      });
       if (alt?.streamUrl) {
         logger.info(`[SoundCloud] Switched to playable alternative: "${alt.song.name}" (${alt.song.url})`);
         return alt.streamUrl;
@@ -146,11 +319,8 @@ function enhanceSoundCloudPlugin(scPlugin, getFallbackPlugin) {
     if (ytPlugin && song.name) {
       try {
         logger.warn(`[SoundCloud] Attempting YouTube fallback for "${song.name}"...`);
-        const ytSong = await ytPlugin.resolve(`ytsearch:${song.name}`, {});
-        if (ytSong) {
-          const ytUrl = await ytPlugin.getStreamURL(ytSong);
-          if (ytUrl) return ytUrl;
-        }
+        const ytDirect = await ytPlugin.getDirectYouTubeStream(`ytsearch:${song.name}`);
+        if (ytDirect?.url) return ytDirect.url;
       } catch (ytErr) {
         logger.warn(`[SoundCloud] YouTube fallback failed: ${ytErr.message}`);
       }
@@ -169,4 +339,6 @@ module.exports = {
   enhanceSoundCloudPlugin,
   findPlayableSoundCloudTrack,
   getUnencryptedStreamForTrack,
+  resolveSpotifyTrackStream,
+  scoreSoundCloudCandidate,
 };
