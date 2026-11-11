@@ -20,4 +20,4 @@ COPY . .
 EXPOSE 3000
 
 # Start Nobu
-CMD ["node", "src/index.js"]
+CMD ["node", "--max-old-space-size=192", "src/index.js"]

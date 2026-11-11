@@ -23,6 +23,7 @@ module.exports = {
 
   async execute(interaction, client) {
     const memory = process.memoryUsage();
+    const rssMemoryMB = (memory.rss / 1024 / 1024).toFixed(2);
     const usedMemoryMB = (memory.heapUsed / 1024 / 1024).toFixed(2);
     const totalMemoryMB = (memory.heapTotal / 1024 / 1024).toFixed(2);
 
@@ -55,7 +56,7 @@ module.exports = {
         },
         {
           name: '💾 Memory Usage',
-          value: `\`${usedMemoryMB} MB / ${totalMemoryMB} MB\``,
+          value: `\`RSS: ${rssMemoryMB} MB\`\n\`Heap: ${usedMemoryMB} / ${totalMemoryMB} MB\``,
           inline: true,
         },
         {

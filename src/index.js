@@ -1,7 +1,3 @@
-try {
-  require('v8').setFlagsFromString('--max_old_space_size=65');
-} catch (_) {}
-
 const {
   Client,
   GatewayIntentBits,
@@ -9,6 +5,7 @@ const {
   EmbedBuilder,
   Events: DiscordEvents,
   ActivityType,
+  Options,
   REST,
   Routes,
 } = require('discord.js');
@@ -17,6 +14,7 @@ const { SpotifyPlugin } = require('@distube/spotify');
 const { SoundCloudPlugin } = require('@distube/soundcloud');
 const { SafeYtDlpPlugin } = require('./utils/safeYtDlpPlugin');
 const { DirectLinkPlugin } = require('@distube/direct-link');
+const { spawnSync } = require('child_process');
 const ffmpegStatic = require('ffmpeg-static');
 const express = require('express');
 const fs = require('fs');
@@ -40,12 +38,12 @@ if (!validation.valid) {
   logger.warn('================================================================');
 }
 
-// Initialize Discord Client
+// Initialize Discord Client with bounded caches to minimize memory footprint
 const recentLogs = [];
 function addLog(type, msg) {
   const line = `[${new Date().toISOString().substring(11, 19)}] [${type}] ${msg}`;
   recentLogs.push(line);
-  if (recentLogs.length > 25) recentLogs.shift();
+  if (recentLogs.length > 40) recentLogs.shift();
 }
 
 const client = new Client({
@@ -56,6 +54,16 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+  makeCache: Options.cacheWithLimits({
+    ...Options.DefaultMakeCacheSettings,
+    MessageManager: 10,
+    PresenceManager: 0,
+    ThreadManager: 0,
+    GuildEmojiManager: 0,
+    GuildStickerManager: 0,
+    GuildScheduledEventManager: 0,
+    StageInstanceManager: 0,
+  }),
 });
 
 client.on('debug', (info) => {
@@ -90,22 +98,39 @@ const plugins = [
   ),
   new DirectLinkPlugin(),
   new SafeYtDlpPlugin({
-    update: true,
+    update: false,
   }),
 ];
 
-// Resolve and verify FFmpeg binary
-let ffmpegPath = 'ffmpeg';
-try {
-  if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
-    try {
-      fs.chmodSync(ffmpegStatic, 0o755);
-    } catch (_) {}
-    ffmpegPath = ffmpegStatic;
-  }
-} catch (_) {
-  ffmpegPath = 'ffmpeg';
+/**
+ * Prefer lightweight system ffmpeg (e.g., via apt on Linux/Discloud),
+ * falling back to ffmpeg-static (Windows / local environments).
+ */
+function resolveFfmpegPath() {
+  try {
+    const sysCheck = spawnSync('ffmpeg', ['-version'], {
+      windowsHide: true,
+      encoding: 'utf8',
+    });
+    if (!sysCheck.error && sysCheck.status === 0) {
+      return 'ffmpeg';
+    }
+  } catch (_) {}
+
+  try {
+    if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
+      try {
+        fs.chmodSync(ffmpegStatic, 0o755);
+      } catch (_) {}
+      return ffmpegStatic;
+    }
+  } catch (_) {}
+
+  return 'ffmpeg';
 }
+
+const ffmpegPath = resolveFfmpegPath();
+logger.info(`Using FFmpeg binary: ${ffmpegPath}`);
 
 // Initialize DisTube
 const distube = new DisTube(client, {
@@ -115,6 +140,7 @@ const distube = new DisTube(client, {
     args: {
       global: {
         loglevel: 'warning',
+        threads: 1,
       },
       input: {
         user_agent:
@@ -132,8 +158,67 @@ const distube = new DisTube(client, {
 client.distube = distube;
 client.commands = new Collection();
 
-// Track recent Now Playing messages per guild to keep channel clean
+// Track recent Now Playing messages and per-guild playback diagnostics
 const nowPlayingMessages = new Map();
+const playbackDiagnostics = new Map();
+
+function ensurePlaybackDiag(guildId) {
+  let diag = playbackDiagnostics.get(guildId);
+  if (!diag) {
+    diag = {
+      songName: null,
+      songDuration: 0,
+      source: 'unknown',
+      startedAt: 0,
+      ffmpegLines: [],
+      voiceEvents: [],
+      lastExit: null,
+      audioError: null,
+      prematureEndReported: false,
+    };
+    playbackDiagnostics.set(guildId, diag);
+  }
+  return diag;
+}
+
+function attachVoiceDiagnostics(queue) {
+  const voice = queue?.voice;
+  if (!voice) return;
+
+  // Raise missed-frame tolerance from default 5 (100ms) to 250 (5s) for HLS/cloud jitter
+  if (voice.audioPlayer?.behaviors) {
+    voice.audioPlayer.behaviors.maxMissedFrames = 250;
+  }
+
+  if (voice.__nobuDiagAttached) return;
+  voice.__nobuDiagAttached = true;
+
+  if (voice.audioPlayer) {
+    voice.audioPlayer.on('stateChange', (oldState, newState) => {
+      const entry = `${oldState.status}->${newState.status}`;
+      const diag = ensurePlaybackDiag(queue.id);
+      diag.voiceEvents.push(entry);
+      if (diag.voiceEvents.length > 10) diag.voiceEvents.shift();
+      addLog('VOICE', `[${queue.id}] Player ${entry}`);
+    });
+    voice.audioPlayer.on('error', (err) => {
+      const msg = err?.message || String(err);
+      const diag = ensurePlaybackDiag(queue.id);
+      diag.audioError = msg;
+      addLog('VOICE_ERR', `[${queue.id}] AudioPlayer error: ${msg}`);
+      logger.error(`[AudioPlayer Error]`, err);
+    });
+  }
+
+  if (voice.connection) {
+    voice.connection.on('stateChange', (oldState, newState) => {
+      addLog('VC', `[${queue.id}] Conn ${oldState.status}->${newState.status}`);
+    });
+    voice.connection.on('error', (err) => {
+      addLog('VC_ERR', `[${queue.id}] Conn error: ${err?.message || err}`);
+    });
+  }
+}
 
 // -------------------------------------------------------------
 // 1. Load Slash Commands
@@ -164,9 +249,25 @@ loadCommands(commandsPath);
 // 2. DisTube Audio Events
 // -------------------------------------------------------------
 
+// When a queue is initialized, configure voice player resilience & telemetry
+distube.on(DisTubeEvents.INIT_QUEUE, (queue) => {
+  attachVoiceDiagnostics(queue);
+});
+
 // When a song starts playing
 distube.on(DisTubeEvents.PLAY_SONG, async (queue, song) => {
   logger.music(`Playing: "${song.name}" in [${queue.voiceChannel?.name || 'Voice'}]`);
+  addLog('PLAY', `[${queue.id}] "${song.name}" (${song.duration || 0}s, src=${song.source || 'unknown'})`);
+
+  attachVoiceDiagnostics(queue);
+
+  const diag = ensurePlaybackDiag(queue.id);
+  diag.songName = song.name;
+  diag.songDuration = song.duration || 0;
+  diag.source = song.source || 'unknown';
+  diag.startedAt = Date.now();
+  diag.audioError = null;
+  diag.prematureEndReported = false;
 
   try {
     const embed = createNowPlayingEmbed(song, queue);
@@ -183,7 +284,10 @@ distube.on(DisTubeEvents.PLAY_SONG, async (queue, song) => {
         embeds: [embed],
         components,
       });
-      nowPlayingMessages.set(queue.id, msg);
+      // Only track it if the song hasn't already finished prematurely
+      if (!diag.prematureEndReported) {
+        nowPlayingMessages.set(queue.id, msg);
+      }
     }
   } catch (err) {
     logger.error('Error sending now-playing message:', err);
@@ -234,9 +338,67 @@ distube.on(DisTubeEvents.ADD_LIST, (queue, playlist) => {
   queue.textChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
+// Detect silent/premature stream exits (e.g. OOM SIGKILL or 0-frame EOF)
+distube.on(DisTubeEvents.FINISH_SONG, (queue, song) => {
+  const diag = playbackDiagnostics.get(queue.id);
+  const elapsedSec = diag && diag.startedAt ? (Date.now() - diag.startedAt) / 1000 : 0;
+  const voiceSec = queue.voice?.playbackDuration || 0;
+  const expectedDur = song?.duration || diag?.songDuration || 0;
+
+  addLog(
+    'FINISH_SONG',
+    `[${queue.id}] "${song?.name || diag?.songName}" elapsed=${elapsedSec.toFixed(2)}s voice=${voiceSec.toFixed(2)}s/${expectedDur}s`
+  );
+
+  if (diag && expectedDur > 10 && elapsedSec < 3.5 && voiceSec < 2) {
+    diag.prematureEndReported = true;
+    const mem = process.memoryUsage();
+    const rssMB = (mem.rss / 1024 / 1024).toFixed(1);
+    const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
+    const isSigKill = diag.lastExit && (diag.lastExit.includes('SIGKILL') || diag.lastExit.includes('code=null'));
+
+    logger.warn(
+      `Premature stream stop for "${song?.name}": elapsed=${elapsedSec.toFixed(2)}s voice=${voiceSec.toFixed(2)}s RSS=${rssMB}MB exit=${diag.lastExit}`
+    );
+
+    if (queue.textChannel) {
+      const reasonHint = isSigKill
+        ? '**Cause Detected:** FFmpeg was killed by the host OS (`SIGKILL` / Out of Memory). Discloud\'s 100 MB free tier limit is too small for Node.js + FFmpeg audio decoding.'
+        : '**Cause:** Audio pipeline ended before sending frames to Discord Voice.';
+
+      const details = [
+        `• **Track:** ${song?.name || diag.songName || 'Unknown'} (\`${expectedDur}s\`)`,
+        `• **Played:** \`${voiceSec.toFixed(2)}s\` (stopped after \`${elapsedSec.toFixed(2)}s\`)`,
+        `• **Host RAM (Node RSS / Heap):** \`${rssMB} MB\` / \`${heapMB} MB\` (plus FFmpeg ~30-45 MB)`,
+        `• **FFmpeg Exit:** \`${diag.lastExit || 'unknown'}\``,
+        diag.voiceEvents.length ? `• **Voice Player:** \`${diag.voiceEvents.slice(-5).join(' | ')}\`` : null,
+        diag.audioError ? `• **Player Error:** \`${diag.audioError}\`` : null,
+        diag.ffmpegLines.length
+          ? `• **FFmpeg Log:** \`${diag.ffmpegLines.slice(-3).join(' / ').slice(0, 250)}\``
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      const diagEmbed = new EmbedBuilder()
+        .setColor(config.errorColor)
+        .setTitle('⚠️ Audio Stream Terminated Early')
+        .setDescription(`${reasonHint}\n\n${details}`);
+
+      queue.textChannel.send({ embeds: [diagEmbed] }).catch(() => {});
+    }
+  }
+});
+
 // When the queue finishes
 distube.on(DisTubeEvents.FINISH, (queue) => {
   logger.music(`Queue finished in [${queue.voiceChannel?.name || 'Voice'}]`);
+  const diag = playbackDiagnostics.get(queue.id);
+
+  // If premature failure was just diagnosed, don't delete Now Playing or show misleading "all played"
+  if (diag?.prematureEndReported) {
+    return;
+  }
 
   // Clean up last now-playing message
   const previousMsg = nowPlayingMessages.get(queue.id);
@@ -268,6 +430,7 @@ distube.on(DisTubeEvents.EMPTY, (queue) => {
 // DisTube error handling
 distube.on(DisTubeEvents.ERROR, (error, queue, song) => {
   logger.error('DisTube error occurred:', error);
+  addLog('DT_ERR', error?.message || String(error));
 
   if (queue && queue.textChannel) {
     const embed = new EmbedBuilder()
@@ -278,9 +441,31 @@ distube.on(DisTubeEvents.ERROR, (error, queue, song) => {
   }
 });
 
-// FFMPEG Debug (optional diagnostic)
+// FFMPEG Debug diagnostic capture
 distube.on(DisTubeEvents.FFMPEG_DEBUG, (debug) => {
-  logger.info(`[FFMPEG Debug] ${debug}`);
+  const str = String(debug || '');
+  if (!str.includes('size=')) {
+    logger.info(`[FFMPEG Debug] ${str}`);
+  }
+
+  const match = /^\[(\d+)\]\s*(.*)$/.exec(str);
+  if (match) {
+    const guildId = match[1];
+    const msg = match[2];
+    const diag = ensurePlaybackDiag(guildId);
+
+    if (msg.includes('[process] exit:')) {
+      diag.lastExit = msg.replace('[process] exit:', '').trim();
+      addLog('FFMPEG', `[${guildId}] ${msg}`);
+    } else if (!msg.includes('size=') && !msg.startsWith('[process] spawn:')) {
+      diag.ffmpegLines.push(msg);
+      if (diag.ffmpegLines.length > 10) diag.ffmpegLines.shift();
+      addLog('FFMPEG', `[${guildId}] ${msg.slice(0, 120)}`);
+    } else if (msg.startsWith('[process] spawn:')) {
+      diag.lastExit = null;
+      diag.ffmpegLines = [];
+    }
+  }
 });
 
 // -------------------------------------------------------------
@@ -531,6 +716,7 @@ let isConnected = false;
 const app = express();
 
 app.get('/', (req, res) => {
+  const mem = process.memoryUsage();
   res.json({
     status: isConnected ? 'online' : (loginError ? 'error' : 'connecting'),
     discordConnected: isConnected,
@@ -541,7 +727,14 @@ app.get('/', (req, res) => {
     uptimeSeconds: Math.floor(process.uptime()),
     pingMs: client.ws ? Math.round(client.ws.ping) : null,
     guildsCount: client.guilds ? client.guilds.cache.size : 0,
+    memoryMB: {
+      rss: Number((mem.rss / 1024 / 1024).toFixed(1)),
+      heapUsed: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
+      heapTotal: Number((mem.heapTotal / 1024 / 1024).toFixed(1)),
+    },
+    ffmpegPath,
     timestamp: new Date().toISOString(),
+    diagnostics: Object.fromEntries(playbackDiagnostics),
     recentLogs,
   });
 });

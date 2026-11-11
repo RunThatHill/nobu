@@ -89,12 +89,12 @@ class SafeYtDlpSong extends Song {
 class SafeYtDlpPlugin extends PlayableExtractorPlugin {
   constructor(options = {}) {
     super();
-    try {
-      const { download } = require('@distube/yt-dlp');
-      if (options.update !== false) {
+    if (options.update === true) {
+      try {
+        const { download } = require('@distube/yt-dlp');
         download().catch(() => {});
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
   }
 
   /**
