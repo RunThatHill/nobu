@@ -4,7 +4,7 @@
   "description": "Nobu - A sleek and modern Discord Music Bot",
   "main": "src/index.js",
   "scripts": {
-    "start": "node --expose-gc --optimize-for-size --max-old-space-size=28 src/index.js",
+    "start": "node --expose-gc --optimize-for-size --max-semi-space-size=1 --max-old-space-size=20 src/index.js",
     "deploy-commands": "node src/deploy-commands.js"
   },
   "keywords": [

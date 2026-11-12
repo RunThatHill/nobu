@@ -227,5 +227,34 @@ Ensure the bot's role in your Discord server has permissions to `Connect` and `S
 
 ---
 
+## 🌐 Live Web Dashboard (Hosted on Google Firebase)
+
+Nobu includes a Google-hosted web dashboard (`web/`) powered by **Firebase Hosting**, **Firebase Authentication (Google Sign-In)**, and **Firebase Realtime Database**. It works even when Nobu runs on Discloud (`TYPE=bot`) or locally with no open inbound ports.
+
+1. **Create a Firebase Project** at [console.firebase.google.com](https://console.firebase.google.com/):
+   - Enable **Authentication -> Sign-in method -> Google**.
+   - Enable **Realtime Database** (start in locked mode).
+   - Register a **Web App** (`</>`) and copy its config into `web/firebase-config.js`.
+2. **Restrict Access by Google Email:**
+   - Replace `'you@gmail.com'` in `database.rules.json` with your Google email(s).
+   - Optionally also add the same email(s) to `ALLOWED_EMAILS` in `web/firebase-config.js` and `DASHBOARD_ALLOWED_EMAILS` in `.env`.
+3. **Connect Nobu to Realtime Database:**
+   - In Firebase Console -> **Project Settings -> Service Accounts**, click **Generate new private key**.
+   - Add to your `.env` (or Discloud/host environment variables):
+     ```env
+     FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebaseio.com
+     FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxx@your-project.iam.gserviceaccount.com
+     FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+     DASHBOARD_ALLOWED_EMAILS=you@gmail.com
+     ```
+4. **Deploy to Google (`*.web.app`):**
+   ```bash
+   npx firebase-tools login
+   npx firebase-tools use --add
+   npx firebase-tools deploy
+   ```
+
+---
+
 ## 📜 License
 Distributed under the MIT License.

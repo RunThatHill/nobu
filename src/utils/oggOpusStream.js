@@ -57,9 +57,10 @@ class OggOpusStream extends EventEmitter {
     }
     ffArgs.push(
       '-analyzeduration', '0',
-      '-probesize', '32768',
+      '-probesize', '16384',
       '-threads', '1',
-      '-max_alloc', '8388608',
+      '-max_alloc', '4194304',
+      '-bufsize', '32k',
       '-hide_banner'
     );
 
@@ -103,7 +104,7 @@ class OggOpusStream extends EventEmitter {
 
     this.#opts = ffArgs;
     this.process = null;
-    this.stream = new PassThrough({ highWaterMark: 16384 });
+    this.stream = new PassThrough({ highWaterMark: 8192 });
     this.stream
       .on('close', () => this.kill())
       .on('error', (err) => {

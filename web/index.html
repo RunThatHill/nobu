@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nobu — Live Music Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%235865F2'/%3E%3Cpath d='M26 44V20l20-4v22' fill='none' stroke='white' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='21' cy='45' r='6' fill='white'/%3E%3Ccircle cx='41' cy='39' r='6' fill='white'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="ambient-bg" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+  </div>
+
+  <!-- Setup Required Banner (shown only if firebase-config.js still has placeholders) -->
+  <main id="setup-view" class="centered-screen hidden">
+    <section class="glass card auth-card setup-card">
+      <div class="brand-badge">
+        <div class="brand-logo" aria-hidden="true">🎵</div>
+        <div>
+          <h1>Nobu Dashboard</h1>
+          <p class="muted">Firebase configuration needed</p>
+        </div>
+      </div>
+      <p class="setup-copy">
+        Edit <code>web/firebase-config.js</code> with your Firebase Web App credentials and deploy with
+        <code>firebase deploy</code>.
+      </p>
+      <ol class="setup-steps">
+        <li>Create a Firebase project &amp; enable <strong>Google Sign-In</strong> (Authentication) and <strong>Realtime Database</strong>.</li>
+        <li>Paste your Web App config into <code>web/firebase-config.js</code>.</li>
+        <li>Add your Google email in <code>database.rules.json</code> and deploy rules + hosting.</li>
+        <li>Set <code>FIREBASE_DATABASE_URL</code>, <code>FIREBASE_CLIENT_EMAIL</code>, and <code>FIREBASE_PRIVATE_KEY</code> in Nobu's <code>.env</code>.</li>
+      </ol>
+    </section>
+  </main>
+
+  <!-- Google Sign-In Gate -->
+  <main id="auth-view" class="centered-screen hidden">
+    <section class="glass card auth-card">
+      <div class="brand-badge">
+        <div class="brand-logo" aria-hidden="true">🎵</div>
+        <div>
+          <h1>Nobu Music</h1>
+          <p class="muted">Live Discord Player &amp; Queue Manager</p>
+        </div>
+      </div>
+      <p class="auth-desc">
+        Sign in with an authorized Google account to view what Nobu is playing and manage playback in real time.
+      </p>
+      <button id="google-signin-btn" class="btn btn-google" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.5 3.9-5.5 3.9-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.1.8 3.9 1.5l2.7-2.6C16.9 3.3 14.7 2.4 12 2.4 6.7 2.4 2.4 6.7 2.4 12S6.7 21.6 12 21.6c6.9 0 9.1-4.8 9.1-7.3 0-.5-.1-.9-.1-1.3H12z"/>
+        </svg>
+        <span>Continue with Google</span>
+      </button>
+      <p id="auth-error" class="error-text hidden"></p>
+    </section>
+  </main>
+
+  <!-- Unauthorized Screen -->
+  <main id="denied-view" class="centered-screen hidden">
+    <section class="glass card auth-card">
+      <h2>Access Restricted</h2>
+      <p id="denied-message" class="muted"></p>
+      <button id="denied-signout-btn" class="btn btn-secondary" type="button">Sign out &amp; switch account</button>
+    </section>
+  </main>
+
+  <!-- Main Dashboard -->
+  <div id="app-view" class="app-shell hidden">
+    <header class="topbar glass">
+      <div class="topbar-left">
+        <div id="bot-avatar-fallback" class="brand-logo bot-avatar-box" aria-hidden="true">🎵</div>
+        <img id="bot-avatar" class="bot-avatar hidden" alt="Nobu" />
+        <div>
+          <div class="brand-row">
+            <span class="brand-name">Nobu</span>
+            <span id="bot-status-pill" class="status-pill offline">Connecting…</span>
+          </div>
+          <p id="bot-metrics" class="muted small-text">Waiting for telemetry…</p>
+        </div>
+      </div>
+
+      <div class="topbar-controls">
+        <label class="select-wrap" title="Discord Server">
+          <span class="sr-only">Server</span>
+          <select id="guild-select"></select>
+        </label>
+
+        <button id="refresh-btn" class="btn btn-icon" type="button" title="Refresh state from Nobu" aria-label="Refresh">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <polyline points="21 3 21 9 15 9" />
+          </svg>
+        </button>
+
+        <div class="user-chip">
+          <img id="user-avatar" class="user-avatar hidden" alt="" />
+          <span id="user-email" class="user-email"></span>
+          <button id="signout-btn" class="btn btn-ghost btn-sm" type="button">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Play / Queue Search Bar -->
+    <section class="glass card play-bar">
+      <form id="play-form" class="play-form">
+        <div class="search-input-wrap">
+          <input
+            id="play-query"
+            type="text"
+            placeholder="Search a song or paste YouTube / Spotify / SoundCloud URL…"
+            autocomplete="off"
+            required
+          />
+          <button id="search-clear-btn" class="search-clear-btn hidden" type="button" title="Clear input" aria-label="Clear input">✕</button>
+        </div>
+        <select id="play-source" title="Search Source">
+          <option value="auto">Auto (SoundCloud)</option>
+          <option value="youtube">YouTube</option>
+          <option value="spotify">Spotify</option>
+        </select>
+        <select id="voice-channel-select" title="Target Voice Channel"></select>
+        <button id="play-submit-btn" class="btn btn-primary" type="submit">
+          <span id="submit-btn-label">Search Tracks</span>
+        </button>
+      </form>
+
+      <!-- Search Menu / Dropdown -->
+      <div id="search-menu" class="search-menu hidden" aria-live="polite">
+        <div class="search-menu-header">
+          <div class="search-menu-title-wrap">
+            <span class="search-menu-title">🔍 Search Results</span>
+            <span id="search-query-tag" class="muted small-text"></span>
+          </div>
+          <button id="btn-close-search" class="btn btn-ghost btn-sm" type="button" title="Close search menu">✕ Close</button>
+        </div>
+        <div id="search-loading" class="search-loading hidden">
+          <div class="search-spinner" aria-hidden="true"></div>
+          <span>Searching tracks on SoundCloud…</span>
+        </div>
+        <div id="search-empty" class="search-empty hidden">
+          <span>No tracks found. Try a different keyword or paste a direct URL.</span>
+        </div>
+        <ul id="search-results-list" class="search-results-list"></ul>
+      </div>
+    </section>
+
+    <div class="dashboard-grid">
+      <!-- Left: Now Playing & Controls -->
+      <section class="glass card player-card">
+        <div class="card-header">
+          <h2>Now Playing</h2>
+          <span id="vc-badge" class="pill muted-pill">Not in voice</span>
+        </div>
+
+        <div id="idle-state" class="idle-state">
+          <div class="idle-icon">🎵</div>
+          <h3>Nothing is playing</h3>
+          <p class="muted">Use the bar above or <code>/play</code> in Discord to start listening.</p>
+        </div>
+
+        <div id="active-player" class="hidden">
+          <div class="track-hero">
+            <div class="art-wrap">
+              <img id="track-art" class="track-art hidden" alt="Track artwork" />
+              <div id="track-art-fallback" class="track-art-fallback">🎶</div>
+            </div>
+            <div class="track-meta">
+              <div class="meta-badges">
+                <span id="track-source" class="pill source-pill">SoundCloud</span>
+                <span id="playback-state-badge" class="pill state-pill">Playing</span>
+              </div>
+              <a id="track-title" class="track-title" href="#" target="_blank" rel="noopener noreferrer">—</a>
+              <p id="track-requester" class="muted small-text">Requested by —</p>
+            </div>
+          </div>
+
+          <!-- Progress / Seek Bar -->
+          <div class="progress-section">
+            <div id="progress-bar" class="progress-bar" role="slider" tabindex="0" aria-label="Seek track">
+              <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <div class="time-row">
+              <span id="time-current">0:00</span>
+              <span id="time-total">0:00</span>
+            </div>
+          </div>
+
+          <!-- Primary Transport Controls -->
+          <div class="transport-row">
+            <button id="btn-shuffle" class="btn btn-icon" type="button" title="Shuffle queue" aria-label="Shuffle">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+                <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+                <line x1="4" y1="4" x2="9" y2="9"/>
+              </svg>
+            </button>
+
+            <button id="btn-rewind" class="btn btn-icon" type="button" title="Rewind 10s" aria-label="Rewind 10 seconds">
+              <span class="mini-label">-10s</span>
+            </button>
+
+            <button id="btn-play-pause" class="btn btn-primary btn-round" type="button" title="Pause / Resume" aria-label="Pause or Resume">
+              <svg id="icon-pause" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>
+              </svg>
+              <svg id="icon-play" class="hidden" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <polygon points="6 4 20 12 6 20 6 4"/>
+              </svg>
+            </button>
+
+            <button id="btn-skip" class="btn btn-icon" type="button" title="Skip track" aria-label="Skip">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                <polygon points="5 4 15 12 5 20 5 4"/><rect x="17" y="5" width="2.5" height="14" rx="1"/>
+              </svg>
+            </button>
+
+            <button id="btn-stop" class="btn btn-icon btn-danger-soft" type="button" title="Stop & clear" aria-label="Stop">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                <rect x="5" y="5" width="14" height="14" rx="2"/>
+              </svg>
+            </button>
+
+            <button id="btn-loop" class="btn btn-chip" type="button" title="Cycle loop mode">
+              🔁 <span id="loop-label">Off</span>
+            </button>
+
+            <button id="btn-autoplay" class="btn btn-chip" type="button" title="Toggle Autoplay">
+              📻 <span id="autoplay-label">Autoplay</span>
+            </button>
+          </div>
+
+          <!-- Volume Slider -->
+          <div class="volume-row">
+            <span class="muted small-text">🔊 Volume</span>
+            <input id="volume-slider" type="range" min="1" max="100" value="50" aria-label="Volume" />
+            <span id="volume-value" class="volume-value">50%</span>
+          </div>
+
+          <!-- Audio Filters -->
+          <div class="filters-section">
+            <span class="muted small-text">🎛️ Audio Filters</span>
+            <div id="filters-grid" class="filters-grid">
+              <button class="filter-chip" data-filter="clear" type="button">Clear</button>
+              <button class="filter-chip" data-filter="bassboost" type="button">Bass Boost</button>
+              <button class="filter-chip" data-filter="nightcore" type="button">Nightcore</button>
+              <button class="filter-chip" data-filter="3d" type="button">3D Surround</button>
+              <button class="filter-chip" data-filter="echo" type="button">Echo</button>
+              <button class="filter-chip" data-filter="karaoke" type="button">Karaoke</button>
+              <button class="filter-chip" data-filter="vaporwave" type="button">Vaporwave</button>
+              <button class="filter-chip" data-filter="flanger" type="button">Flanger</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Queue Management -->
+      <section class="glass card queue-card">
+        <div class="card-header">
+          <div>
+            <h2>Up Next</h2>
+            <p id="queue-summary" class="muted small-text">0 tracks in queue</p>
+          </div>
+          <button id="btn-clear-queue" class="btn btn-ghost btn-sm hidden" type="button">Clear upcoming</button>
+        </div>
+
+        <ul id="queue-list" class="queue-list"></ul>
+        <p id="queue-empty" class="muted empty-queue">No upcoming tracks queued.</p>
+      </section>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

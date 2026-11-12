@@ -1,0 +1,7 @@
+web/
+firebase.json
+.firebaserc
+database.rules.json
+.firebase/
+.git/
+*.zip

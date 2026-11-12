@@ -1,5 +1,20 @@
 require('dotenv').config();
 
+function normalizePrivateKey(raw) {
+  let key = (raw || '').trim().replace(/^["']|["']$/g, '');
+  if (!key) return '';
+  key = key.replace(/\\\\n/g, '\n').replace(/\\n/g, '\n').trim();
+  const body = key
+    .replace(/-----BEGIN (?:RSA )?PRIVATE KEY-----/g, '')
+    .replace(/-----END (?:RSA )?PRIVATE KEY-----/g, '')
+    .replace(/\s+/g, '');
+  if (!body) return '';
+  const isRsa = key.includes('BEGIN RSA PRIVATE KEY');
+  const label = isRsa ? 'RSA PRIVATE KEY' : 'PRIVATE KEY';
+  const lines = body.match(/.{1,64}/g) || [body];
+  return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----\n`;
+}
+
 const config = {
   // Discord Bot
   token: (process.env.DISCORD_TOKEN || '').trim().replace(/^["']|["']$/g, ''),
@@ -20,6 +35,18 @@ const config = {
   // SoundCloud (Optional)
   soundcloud: {
     clientId: process.env.SOUNDCLOUD_CLIENT_ID || undefined,
+  },
+
+  // Firebase Realtime Database Sync for Web Dashboard (Optional)
+  firebase: {
+    databaseUrl: (process.env.FIREBASE_DATABASE_URL || '').trim().replace(/\/+$/, ''),
+    clientEmail: (process.env.FIREBASE_CLIENT_EMAIL || '').trim(),
+    privateKey: normalizePrivateKey(process.env.FIREBASE_PRIVATE_KEY),
+    dbSecret: (process.env.FIREBASE_DB_SECRET || '').trim(),
+    allowedEmails: (process.env.DASHBOARD_ALLOWED_EMAILS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
   },
 
   // Bot Theme & Branding

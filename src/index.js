@@ -8,14 +8,35 @@ const {
   Options,
   REST,
   Routes,
+  BaseGuildVoiceChannel,
+  PermissionFlagsBits,
 } = require('discord.js');
+
+// Ensure BaseGuildVoiceChannel#joinable never gives a false negative
+// when member caches are minimized for 100 MB RAM hosting
+const origJoinableDesc = Object.getOwnPropertyDescriptor(BaseGuildVoiceChannel.prototype, 'joinable');
+if (origJoinableDesc?.get) {
+  const origJoinable = origJoinableDesc.get;
+  Object.defineProperty(BaseGuildVoiceChannel.prototype, 'joinable', {
+    get() {
+      try {
+        const canJoin = origJoinable.call(this);
+        if (canJoin) return true;
+      } catch (_) {}
+      const me = this.guild.members?.me || this.client.user;
+      const perms = this.permissionsFor(me);
+      if (!perms) return true;
+      return perms.has(PermissionFlagsBits.Connect, false) && perms.has(PermissionFlagsBits.ViewChannel, false);
+    },
+    configurable: true,
+  });
+}
 const { DisTube, DisTubeError, Events: DisTubeEvents } = require('distube');
 const { SpotifyPlugin } = require('@distube/spotify');
 const { SoundCloudPlugin } = require('@distube/soundcloud');
 const { SafeYtDlpPlugin } = require('./utils/safeYtDlpPlugin');
 const { DirectLinkPlugin } = require('@distube/direct-link');
 const { spawnSync } = require('child_process');
-const ffmpegStatic = require('ffmpeg-static');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +49,8 @@ const {
 } = require('./utils/playerUi');
 const { getMemberVoiceChannel } = require('./utils/voiceUtils');
 const { OggOpusStream } = require('./utils/oggOpusStream');
-const { enhanceSoundCloudPlugin, findPlayableSoundCloudTrack, resolveSpotifyTrackStream } = require('./utils/soundcloudUtils');
+const { enhanceSoundCloudPlugin, resolvePlayQuery, resolveSpotifyTrackStream } = require('./utils/soundcloudUtils');
+const { createFirebaseSync } = require('./utils/firebaseSync');
 
 // Validate environment variables
 const validation = validateConfig();
@@ -40,38 +62,80 @@ if (!validation.valid) {
   logger.warn('================================================================');
 }
 
-// Initialize Discord Client with bounded caches to minimize memory footprint
+// Initialize Discord Client with strict cache limits & sweepers to minimize memory footprint
 const recentLogs = [];
 function addLog(type, msg) {
   const line = `[${new Date().toISOString().substring(11, 19)}] [${type}] ${msg}`;
   recentLogs.push(line);
-  if (recentLogs.length > 40) recentLogs.shift();
+  if (recentLogs.length > 15) recentLogs.shift();
+}
+
+function trimSongMemory(song) {
+  if (!song || typeof song !== 'object') return;
+  try {
+    song.raw = undefined;
+    song.formats = undefined;
+  } catch (_) {}
+}
+
+function runGc() {
+  if (typeof global.gc === 'function') {
+    try {
+      global.gc();
+    } catch (_) {}
+  }
 }
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
   makeCache: Options.cacheWithLimits({
     ...Options.DefaultMakeCacheSettings,
-    MessageManager: 10,
+    MessageManager: 0,
     PresenceManager: 0,
     ThreadManager: 0,
     GuildEmojiManager: 0,
     GuildStickerManager: 0,
     GuildScheduledEventManager: 0,
     StageInstanceManager: 0,
+    GuildMemberManager: 10,
+    UserManager: 10,
+    ReactionManager: 0,
+    ReactionUserManager: 0,
+    VoiceStateManager: 30,
+    AutoModerationRuleManager: 0,
+    GuildBanManager: 0,
+    GuildInviteManager: 0,
+    BaseGuildEmojiManager: 0,
   }),
+  sweepers: {
+    ...Options.DefaultSweeperSettings,
+    messages: { interval: 60, lifetime: 30 },
+    users: {
+      interval: 60,
+      filter: () => (user) => user.id !== client.user?.id,
+    },
+    guildMembers: {
+      interval: 60,
+      filter: () => (member) => member.id !== client.user?.id,
+    },
+    voiceStates: {
+      interval: 90,
+      filter: () => (state) => !state.channelId,
+    },
+  },
 });
 
-client.on('debug', (info) => {
-  addLog('DEBUG', info);
-  logger.info(`[Discord Debug] ${info}`);
-});
+if (process.env.DISCORD_DEBUG === '1') {
+  client.on('debug', (info) => {
+    addLog('DEBUG', info);
+    logger.info(`[Discord Debug] ${info}`);
+  });
+}
 client.on('warn', (warning) => {
   addLog('WARN', warning);
   logger.warn(`[Discord Warn] ${warning}`);
@@ -136,6 +200,7 @@ function resolveFfmpegInfo() {
   } catch (_) {}
 
   try {
+    const ffmpegStatic = require('ffmpeg-static');
     if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
       try {
         fs.chmodSync(ffmpegStatic, 0o755);
@@ -252,6 +317,7 @@ if (ffmpegInfo.hasLibopus) {
 
 client.distube = distube;
 client.commands = new Collection();
+const firebaseSync = createFirebaseSync({ client, distube, scPlugin });
 
 // Track recent Now Playing messages and per-guild playback diagnostics
 const nowPlayingMessages = new Map();
@@ -351,6 +417,7 @@ distube.on(DisTubeEvents.INIT_QUEUE, (queue) => {
 
 // When a song starts playing
 distube.on(DisTubeEvents.PLAY_SONG, async (queue, song) => {
+  trimSongMemory(song);
   logger.music(`Playing: "${song.name}" in [${queue.voiceChannel?.name || 'Voice'}]`);
   addLog('PLAY', `[${queue.id}] "${song.name}" (${song.duration || 0}s, src=${song.source || 'unknown'})`);
 
@@ -388,11 +455,14 @@ distube.on(DisTubeEvents.PLAY_SONG, async (queue, song) => {
   } catch (err) {
     logger.error('Error sending now-playing message:', err);
   }
+  firebaseSync.scheduleSync(150);
 });
 
 // When a single song is added to an existing queue
 distube.on(DisTubeEvents.ADD_SONG, (queue, song) => {
+  trimSongMemory(song);
   logger.music(`Added to queue: "${song.name}"`);
+  firebaseSync.scheduleSync(200);
 
   if (!queue.textChannel) return;
   const embed = new EmbedBuilder()
@@ -414,7 +484,12 @@ distube.on(DisTubeEvents.ADD_SONG, (queue, song) => {
 
 // When a playlist is added
 distube.on(DisTubeEvents.ADD_LIST, (queue, playlist) => {
+  if (Array.isArray(playlist?.songs)) {
+    playlist.songs.forEach(trimSongMemory);
+  }
+  runGc();
   logger.music(`Added playlist: "${playlist.name}" (${playlist.songs.length} tracks)`);
+  firebaseSync.scheduleSync(250);
 
   if (!queue.textChannel) return;
   const embed = new EmbedBuilder()
@@ -436,6 +511,8 @@ distube.on(DisTubeEvents.ADD_LIST, (queue, playlist) => {
 
 // Detect silent/premature stream exits (e.g. OOM SIGKILL or 0-frame EOF)
 distube.on(DisTubeEvents.FINISH_SONG, (queue, song) => {
+  runGc();
+  firebaseSync.scheduleSync(250);
   const diag = playbackDiagnostics.get(queue.id);
   const elapsedSec = diag && diag.startedAt ? (Date.now() - diag.startedAt) / 1000 : 0;
   const voiceSec = queue.voice?.playbackDuration || 0;
@@ -489,6 +566,7 @@ distube.on(DisTubeEvents.FINISH_SONG, (queue, song) => {
 // When the queue finishes
 distube.on(DisTubeEvents.FINISH, (queue) => {
   logger.music(`Queue finished in [${queue.voiceChannel?.name || 'Voice'}]`);
+  firebaseSync.scheduleSync(150);
   const diag = playbackDiagnostics.get(queue.id);
 
   // If premature failure was just diagnosed, don't delete Now Playing or show misleading "all played"
@@ -527,6 +605,7 @@ distube.on(DisTubeEvents.EMPTY, (queue) => {
 distube.on(DisTubeEvents.ERROR, (error, queue, song) => {
   logger.error('DisTube error occurred:', error);
   addLog('DT_ERR', error?.message || String(error));
+  firebaseSync.scheduleSync(200);
 
   if (queue && queue.textChannel) {
     const embed = new EmbedBuilder()
@@ -535,6 +614,14 @@ distube.on(DisTubeEvents.ERROR, (error, queue, song) => {
       .setDescription(`An error occurred while playing: \`${error.message || 'Stream extraction failed'}\`\n\n*Tip: If YouTube links fail due to datacenter IP blocks, try searching SoundCloud or Spotify instead!*`);
     queue.textChannel.send({ embeds: [embed] }).catch(() => {});
   }
+});
+
+distube.on(DisTubeEvents.DISCONNECT, () => {
+  firebaseSync.scheduleSync(150);
+});
+
+distube.on(DisTubeEvents.DELETE_QUEUE, () => {
+  firebaseSync.scheduleSync(150);
 });
 
 // FFMPEG Debug diagnostic capture
@@ -608,6 +695,16 @@ client.once(DiscordEvents.ClientReady, async (c) => {
   } catch (err) {
     logger.warn('Slash command auto-registration notice:', err.message);
   }
+
+  firebaseSync.start();
+
+  if (typeof global.gc === 'function') {
+    setInterval(runGc, 20000).unref();
+  }
+});
+
+client.on(DiscordEvents.VoiceStateUpdate, () => {
+  firebaseSync.scheduleSync(500);
 });
 
 // Interaction handler (Slash commands & Interactive Buttons)
@@ -619,6 +716,7 @@ client.on(DiscordEvents.InteractionCreate, async (interaction) => {
 
     try {
       await command.execute(interaction, client);
+      firebaseSync.scheduleSync(250);
     } catch (error) {
       logger.error(`Error executing command /${interaction.commandName}:`, error);
       const replyPayload = {
@@ -732,6 +830,7 @@ client.on(DiscordEvents.InteractionCreate, async (interaction) => {
         default:
           break;
       }
+      firebaseSync.scheduleSync(200);
     } catch (err) {
       logger.error('Button interaction error:', err);
       if (!interaction.replied && !interaction.deferred) {
@@ -757,19 +856,12 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
     if (!voiceChannel) {
       return message.reply('❌ You must be in a voice channel to use Nobu!');
     }
-    let query = args.join(' ');
-    if (!query) {
+    const rawQuery = args.join(' ');
+    if (!rawQuery) {
       return message.reply('⚠️ Please provide a song name or link! (e.g. `!play lofi beats`)');
     }
 
-    if (!query.startsWith('http://') && !query.startsWith('https://')) {
-      try {
-        const found = await findPlayableSoundCloudTrack(scPlugin, query);
-        if (found?.song?.url) {
-          query = found.song.url;
-        }
-      } catch (_) {}
-    }
+    const query = await resolvePlayQuery(scPlugin, rawQuery, 'auto');
 
     try {
       await distube.play(voiceChannel, query, {
@@ -778,6 +870,7 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
         message,
       });
       message.react('🎶').catch(() => {});
+      firebaseSync.scheduleSync(250);
     } catch (err) {
       message.reply(`❌ Playback error: ${err.message}`);
     }
@@ -787,6 +880,7 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
     try {
       await queue.skip();
       message.react('⏭️').catch(() => {});
+      firebaseSync.scheduleSync(250);
     } catch (err) {
       message.reply(`❌ Cannot skip: ${err.message}`);
     }
@@ -795,6 +889,7 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
     if (!queue) return message.reply('❌ Nothing is playing!');
     await queue.stop();
     message.react('⏹️').catch(() => {});
+    firebaseSync.scheduleSync(200);
   } else if (commandName === 'help' || commandName === 'h') {
     message.reply('Use slash commands (`/help`, `/play`, `/queue`, `/nowplaying`) for the modern interactive Nobu experience!');
   }
@@ -832,6 +927,7 @@ const server = http.createServer((req, res) => {
       },
       ffmpegPath,
       libopus: ffmpegInfo.hasLibopus,
+      firebaseEnabled: firebaseSync.isEnabled(),
       timestamp: new Date().toISOString(),
       diagnostics: Object.fromEntries(playbackDiagnostics),
       recentLogs,
@@ -865,6 +961,7 @@ if (config.token) {
 // Graceful shutdown handling
 function handleShutdown(signal) {
   logger.info(`Received ${signal}. Shutting down Nobu gracefully...`);
+  firebaseSync.stop();
   server.close();
   client.destroy();
   process.exit(0);

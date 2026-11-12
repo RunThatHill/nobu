@@ -335,10 +335,41 @@ function enhanceSoundCloudPlugin(scPlugin, getFallbackPlugin) {
   return scPlugin;
 }
 
+/**
+ * Resolves a plain-text search query or URL into a playable DisTube query,
+ * preferring unencrypted SoundCloud tracks unless YouTube is explicitly chosen.
+ */
+async function resolvePlayQuery(scPlugin, rawQuery, source = 'auto') {
+  const query = String(rawQuery || '').trim();
+  if (!query || query.startsWith('http://') || query.startsWith('https://')) {
+    return query;
+  }
+
+  if (source === 'youtube') {
+    return `ytsearch:${query}`;
+  }
+
+  if (scPlugin) {
+    try {
+      logger.info(`[Play] Searching SoundCloud for: "${query}"`);
+      const found = await findPlayableSoundCloudTrack(scPlugin, query);
+      if (found?.song?.url) {
+        logger.info(`[Play] Resolved to playable SoundCloud track: ${found.song.url}`);
+        return found.song.url;
+      }
+    } catch (e) {
+      logger.warn(`[Play] SoundCloud resolution warning: ${e.message}`);
+    }
+  }
+
+  return query;
+}
+
 module.exports = {
   enhanceSoundCloudPlugin,
   findPlayableSoundCloudTrack,
   getUnencryptedStreamForTrack,
+  resolvePlayQuery,
   resolveSpotifyTrackStream,
   scoreSoundCloudCandidate,
 };

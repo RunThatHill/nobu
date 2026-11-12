@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require('../../config');
 const { getMemberVoiceChannel } = require('../../utils/voiceUtils');
-const { findPlayableSoundCloudTrack } = require('../../utils/soundcloudUtils');
+const { resolvePlayQuery } = require('../../utils/soundcloudUtils');
 const logger = require('../../utils/logger');
 
 module.exports = {
@@ -57,32 +57,13 @@ module.exports = {
       }
     }
 
-    let query = interaction.options.getString('query').trim();
+    const rawQuery = interaction.options.getString('query').trim();
     const source = interaction.options.getString('source') || 'auto';
 
     await interaction.deferReply();
 
-    // Handle plain text search queries
-    if (!query.startsWith('http://') && !query.startsWith('https://')) {
-      if (source === 'youtube') {
-        query = `ytsearch:${query}`;
-      } else {
-        // Auto / SoundCloud: Resolve query via SoundCloud, avoiding /cbcs/ DRM & 30s previews
-        const scPlugin = client.distube.plugins.find((p) => p.constructor.name === 'SoundCloudPlugin');
-        if (scPlugin) {
-          try {
-            logger.info(`[Play] Searching SoundCloud for: "${query}"`);
-            const found = await findPlayableSoundCloudTrack(scPlugin, query);
-            if (found?.song?.url) {
-              query = found.song.url;
-              logger.info(`[Play] Resolved to playable SoundCloud track: ${query}`);
-            }
-          } catch (e) {
-            logger.warn(`[Play] SoundCloud resolution warning: ${e.message}`);
-          }
-        }
-      }
-    }
+    const scPlugin = client.distube.plugins.find((p) => p.constructor.name === 'SoundCloudPlugin');
+    const query = await resolvePlayQuery(scPlugin, rawQuery, source);
 
     if (typeof global.gc === 'function') {
       try {
