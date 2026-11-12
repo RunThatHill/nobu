@@ -639,8 +639,10 @@ if (isConfigPlaceholder()) {
     }
 
     // Open Search Menu
+    const sourceLabel = el('play-source').options[el('play-source').selectedIndex]?.text || 'SoundCloud';
     el('search-menu').classList.remove('hidden');
-    el('search-query-tag').textContent = `for "${query}"`;
+    el('search-query-tag').textContent = `for "${query}" (${sourceLabel})`;
+    el('search-loading-text').textContent = `Searching ${sourceLabel} for "${query}"…`;
     el('search-loading').classList.remove('hidden');
     el('search-empty').classList.add('hidden');
     el('search-results-list').textContent = '';
