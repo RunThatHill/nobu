@@ -48,6 +48,17 @@ function formatTime(sec) {
   return `${m}:${String(rem).padStart(2, '0')}`;
 }
 
+function upgradeThumbnail(url) {
+  if (!url || typeof url !== 'string') return '';
+  if (url.includes('sndcdn.com')) {
+    return url.replace(/-(large|badge|small|tiny|crop)\./i, '-t500x500.');
+  }
+  if (url.includes('ytimg.com') || url.includes('youtube.com')) {
+    return url.replace(/\/(default|mqdefault|sddefault)\.jpg/i, '/hqdefault.jpg');
+  }
+  return url;
+}
+
 function formatUptime(sec) {
   const s = Math.max(0, Math.floor(Number(sec) || 0));
   const h = Math.floor(s / 3600);
@@ -252,7 +263,7 @@ if (isConfigPlaceholder()) {
       card.className = 'playlist-card';
 
       const tracks = Array.isArray(pl.tracks) ? pl.tracks : [];
-      const firstThumb = tracks.find((t) => t.thumbnail)?.thumbnail;
+      const firstThumb = upgradeThumbnail(tracks.find((t) => t.thumbnail)?.thumbnail);
       const totalDuration = pl.totalDuration
         ? formatTime(pl.totalDuration)
         : formatTime(tracks.reduce((a, t) => a + (Number(t.duration) || 0), 0));
@@ -434,7 +445,7 @@ if (isConfigPlaceholder()) {
     trackPendingForSave = track;
     const preview = el('modal-target-track');
     preview.innerHTML = `
-      <img src="${track.thumbnail || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'%3E%3Ctext y=\'20\' font-size=\'20\'%3E🎵%3C/text%3E%3C/svg%3E'}" alt="" />
+      <img src="${upgradeThumbnail(track.thumbnail) || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'%3E%3Ctext y=\'20\' font-size=\'20\'%3E🎵%3C/text%3E%3C/svg%3E'}" alt="" />
       <div class="target-track-info">
         <span class="target-track-title">${track.name || 'Unknown Track'}</span>
         <span class="muted small-text">${track.formattedDuration || ''}</span>
@@ -524,7 +535,7 @@ if (isConfigPlaceholder()) {
 
         const thumb = document.createElement('img');
         thumb.className = 'queue-thumb';
-        thumb.src = t.thumbnail || '';
+        thumb.src = upgradeThumbnail(t.thumbnail) || '';
         thumb.alt = '';
 
         const info = document.createElement('div');
@@ -728,7 +739,7 @@ if (isConfigPlaceholder()) {
       thumb.className = 'queue-thumb';
       thumb.alt = '';
       if (song.thumbnail) {
-        thumb.src = song.thumbnail;
+        thumb.src = upgradeThumbnail(song.thumbnail);
       }
 
       const info = document.createElement('div');
@@ -823,7 +834,7 @@ if (isConfigPlaceholder()) {
     const art = el('track-art');
     const fallback = el('track-art-fallback');
     if (song.thumbnail) {
-      art.src = song.thumbnail;
+      art.src = upgradeThumbnail(song.thumbnail);
       art.classList.remove('hidden');
       fallback.classList.add('hidden');
     } else {
@@ -931,7 +942,7 @@ if (isConfigPlaceholder()) {
 
       const thumb = document.createElement('img');
       thumb.className = 'search-result-thumb';
-      thumb.src = track.thumbnail || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'%3E%3Ctext y=\'20\' font-size=\'20\'%3E🎵%3C/text%3E%3C/svg%3E';
+      thumb.src = upgradeThumbnail(track.thumbnail) || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'%3E%3Ctext y=\'20\' font-size=\'20\'%3E🎵%3C/text%3E%3C/svg%3E';
       thumb.alt = '';
 
       const info = document.createElement('div');

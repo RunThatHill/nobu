@@ -48,6 +48,17 @@ function base64UrlEncode(input) {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
+function upgradeThumbnail(url) {
+  if (!url || typeof url !== 'string') return '';
+  if (url.includes('sndcdn.com')) {
+    return url.replace(/-(large|badge|small|tiny|crop)\./i, '-t500x500.');
+  }
+  if (url.includes('ytimg.com') || url.includes('youtube.com')) {
+    return url.replace(/\/(default|mqdefault|sddefault)\.jpg/i, '/hqdefault.jpg');
+  }
+  return url;
+}
+
 function serializeSong(song) {
   if (!song) return null;
   const requester =
@@ -60,7 +71,7 @@ function serializeSong(song) {
   return {
     name: song.name || 'Unknown Track',
     url: song.url || '',
-    thumbnail: song.thumbnail || '',
+    thumbnail: upgradeThumbnail(song.thumbnail) || '',
     duration: Number(song.duration) || 0,
     formattedDuration: song.formattedDuration || (song.duration ? `${song.duration}s` : 'Live'),
     source: song.source || 'unknown',
@@ -384,7 +395,7 @@ function createFirebaseSync({ client, distube, scPlugin, ytPlugin }) {
                 url: r.url,
                 duration: Number(r.duration) || 0,
                 formattedDuration: r.formattedDuration || (r.duration ? `${Math.round(r.duration)}s` : 'Live'),
-                thumbnail: r.thumbnail || '',
+                thumbnail: upgradeThumbnail(r.thumbnail) || '',
                 uploader: r.uploader?.name || 'SoundCloud',
                 source: 'soundcloud',
               }));

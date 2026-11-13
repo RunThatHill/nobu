@@ -80,6 +80,28 @@ function cleanJson(url, extraFlags = [], timeoutMs = 12000) {
   });
 }
 
+function upgradeThumbnail(url) {
+  if (!url || typeof url !== 'string') return '';
+  if (url.includes('sndcdn.com')) {
+    return url.replace(/-(large|badge|small|tiny|crop)\./i, '-t500x500.');
+  }
+  if (url.includes('ytimg.com') || url.includes('youtube.com')) {
+    return url.replace(/\/(default|mqdefault|sddefault)\.jpg/i, '/hqdefault.jpg');
+  }
+  return url;
+}
+
+function pickBestThumbnail(info) {
+  if (!info) return '';
+  const thumbs = Array.isArray(info.thumbnails) ? info.thumbnails : [];
+  const raw =
+    info.thumbnail ||
+    thumbs[thumbs.length - 1]?.url ||
+    thumbs[0]?.url ||
+    '';
+  return upgradeThumbnail(raw);
+}
+
 class SafeYtDlpSong extends Song {
   constructor(plugin, info, options = {}) {
     super(
@@ -90,7 +112,7 @@ class SafeYtDlpSong extends Song {
         id: info.id ? info.id.toString() : 'unknown',
         name: info.title || 'Unknown Title',
         url: info.webpage_url || info.url || '',
-        thumbnail: (info.thumbnails && info.thumbnails[0]?.url) || info.thumbnail || '',
+        thumbnail: pickBestThumbnail(info),
         duration: info.duration || 0,
         views: info.view_count || 0,
         likes: info.like_count || 0,
@@ -141,7 +163,7 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
           id: info.id?.toString(),
           name: info.title,
           url: info.webpage_url,
-          thumbnail: info.thumbnails?.[0]?.url,
+          thumbnail: pickBestThumbnail(info),
         },
         options
       );
@@ -213,7 +235,7 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
           url: e.url && e.url.startsWith('http') ? e.url : (e.id ? `https://www.youtube.com/watch?v=${e.id}` : ''),
           duration: sec,
           formattedDuration: formatted,
-          thumbnail: (Array.isArray(e.thumbnails) && e.thumbnails[0]?.url) || e.thumbnail || '',
+          thumbnail: pickBestThumbnail(e),
           uploader: e.uploader || e.channel || 'YouTube',
           source: 'youtube',
         };

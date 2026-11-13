@@ -11,7 +11,7 @@
   --green: #3dd598;
   --amber: #f5b942;
   --red: #ff5c6c;
-  --radius: 18px;
+  --radius: 20px;
 }
 
 * {
@@ -106,7 +106,7 @@ body {
 
 .card {
   border-radius: var(--radius);
-  padding: 20px;
+  padding: 24px;
 }
 
 .muted {
@@ -329,22 +329,22 @@ select:focus {
 .app-shell {
   position: relative;
   z-index: 1;
-  max-width: 1220px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 28px 24px 48px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 24px;
 }
 
 .topbar {
   border-radius: var(--radius);
-  padding: 14px 18px;
+  padding: 16px 24px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 16px;
 }
 
 .topbar-left {
@@ -447,12 +447,13 @@ select:focus {
 /* Play Bar */
 .play-bar {
   position: relative;
+  padding: 20px 24px;
 }
 
 .play-form {
   display: grid;
   grid-template-columns: 1fr auto auto auto;
-  gap: 10px;
+  gap: 12px;
 }
 
 .search-input-wrap {
@@ -670,8 +671,8 @@ select:focus {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 1.25fr 1fr;
-  gap: 18px;
+  grid-template-columns: 1.18fr 1fr;
+  gap: 24px;
   align-items: start;
 }
 
@@ -680,12 +681,13 @@ select:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .card-header h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
+  font-weight: 700;
 }
 
 /* Player */
@@ -699,36 +701,58 @@ select:focus {
   margin-bottom: 10px;
 }
 
+.track-media,
 .track-hero {
   display: flex;
-  gap: 18px;
   align-items: center;
+  gap: 20px;
+  margin-bottom: 20px;
 }
 
+.track-art-box,
 .art-wrap {
-  width: 108px;
-  height: 108px;
-  flex-shrink: 0;
-  border-radius: 14px;
+  width: 136px;
+  height: 136px;
+  min-width: 136px;
+  min-height: 136px;
+  max-width: 136px;
+  max-height: 136px;
+  border-radius: 18px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.06);
-  display: grid;
-  place-items: center;
+  position: relative;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .track-art {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
 .track-art-fallback {
-  font-size: 2.2rem;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.6rem;
+  background: linear-gradient(135deg, rgba(88, 101, 242, 0.25), rgba(168, 85, 247, 0.25));
 }
 
+.track-text,
 .track-meta {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
 }
 
 .meta-badges {
@@ -750,23 +774,65 @@ select:focus {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  transition: color 0.15s ease;
 }
 
 .track-title:hover {
   color: #b7c1ff;
 }
 
-.progress-section {
-  margin-top: 22px;
+.track-artist {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0;
+  font-weight: 500;
 }
 
+.track-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.btn-save-track {
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.btn-save-track:hover {
+  background: rgba(88, 101, 242, 0.2);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* Progress Bar */
+.progress-wrap,
+.progress-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.progress-bar-bg,
 .progress-bar {
-  position: relative;
-  height: 8px;
-  border-radius: 999px;
+  flex: 1;
+  height: 6px;
   background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
   cursor: pointer;
+  position: relative;
   overflow: hidden;
+  transition: height 0.15s ease;
+}
+
+.progress-bar-bg:hover,
+.progress-bar:hover {
+  height: 8px;
 }
 
 .progress-fill {
@@ -775,6 +841,22 @@ select:focus {
   background: linear-gradient(90deg, var(--accent), #9b87ff);
   border-radius: 999px;
   transition: width 0.25s linear;
+}
+
+.time-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  min-width: 40px;
+}
+
+#time-current {
+  text-align: right;
+}
+
+#time-total {
+  text-align: left;
 }
 
 .time-row {
@@ -786,13 +868,15 @@ select:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* Playback Controls */
+.controls-row,
 .transport-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-top: 20px;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 .mini-label {
@@ -989,8 +1073,8 @@ select:focus {
 /* Dashboard Tabs */
 .dashboard-tabs {
   display: flex;
-  gap: 10px;
-  margin-bottom: 18px;
+  gap: 12px;
+  margin-bottom: 0;
 }
 
 .tab-btn {
@@ -1021,6 +1105,12 @@ select:focus {
   box-shadow: 0 4px 16px rgba(88, 101, 242, 0.25);
 }
 
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
 .tab-panel.hidden {
   display: none !important;
 }
@@ -1043,16 +1133,16 @@ select:focus {
 
 .playlists-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
 }
 
 .playlist-card {
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  border-radius: 16px;
+  padding: 20px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
   transition: all 0.2s ease;
@@ -1068,19 +1158,19 @@ select:focus {
 .playlist-card-top {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
 .playlist-cover {
-  width: 54px;
-  height: 54px;
-  border-radius: 12px;
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
   background: linear-gradient(135deg, rgba(88, 101, 242, 0.3), rgba(168, 85, 247, 0.3));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
+  font-size: 1.6rem;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -1324,20 +1414,49 @@ select:focus {
   text-overflow: ellipsis;
 }
 
-@media (max-width: 920px) {
+@media (max-width: 960px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
+    gap: 20px;
   }
 
   .play-form {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 600px) {
+  .app-shell {
+    padding: 16px 14px 36px;
+    gap: 18px;
+  }
+
+  .card {
+    padding: 18px;
+    border-radius: 16px;
+  }
+
+  .topbar {
+    padding: 14px 16px;
+  }
+
+  .track-media,
   .track-hero {
-    flex-direction: column;
-    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .track-art-box,
+  .art-wrap {
+    width: 96px;
+    height: 96px;
+    min-width: 96px;
+    min-height: 96px;
+    border-radius: 14px;
+  }
+
+  .track-title {
+    font-size: 1.05rem;
   }
 
   .user-email {
