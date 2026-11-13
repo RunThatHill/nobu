@@ -414,9 +414,27 @@ function createFirebaseSync({ client, distube, scPlugin, ytPlugin }) {
       return { ok: true, message: `Found ${results.length} results for "${rawQuery}"` };
     }
 
-    const guild = client.guilds.cache.get(guildId) || client.guilds.cache.first();
+    const guild = client.guilds.cache.get(guildId) || (guildId ? null : client.guilds.cache.first());
     if (!guild) {
-      return { ok: false, message: 'Nobu is not connected to any Discord server.' };
+      return { ok: false, message: 'Nobu is not connected to this Discord server.' };
+    }
+
+    // Security Guild Membership Verification:
+    // If command was sent by a Discord user, ensure they are an active member of this server!
+    if (cmd.discordUserId) {
+      const isMember =
+        guild.members.cache.has(cmd.discordUserId) ||
+        Boolean(await guild.members.fetch(cmd.discordUserId).catch(() => null));
+
+      if (!isMember) {
+        logger.warn(
+          `[Security] Blocked unauthorized command "${action}" from Discord user ${cmd.discordUserId} (${cmd.discordUsername || 'unknown'}) who is NOT in server "${guild.name}" (${guild.id})`
+        );
+        return {
+          ok: false,
+          message: `Access Denied: You must be a member of "${guild.name}" to manage music playback.`,
+        };
+      }
     }
 
     const queue = distube.getQueue(guild.id);

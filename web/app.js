@@ -180,11 +180,23 @@ if (isConfigPlaceholder()) {
     }
   }
 
+  function getAuthorizedGuildIds() {
+    const guilds = latestState?.guilds || {};
+    const botGuildIds = Object.keys(guilds);
+    const userGuildIds = currentDiscordUser?.guilds || [];
+
+    if (Array.isArray(userGuildIds) && userGuildIds.length > 0) {
+      // Strict Security: Show only servers where Nobu is serving AND the user is a verified member
+      return botGuildIds.filter((id) => userGuildIds.includes(id));
+    }
+    return botGuildIds;
+  }
+
   function getSelectedGuild() {
     const guilds = latestState?.guilds || {};
-    const ids = Object.keys(guilds);
+    const ids = getAuthorizedGuildIds();
     if (ids.length === 0) return null;
-    if (!selectedGuildId || !guilds[selectedGuildId]) {
+    if (!selectedGuildId || !ids.includes(selectedGuildId)) {
       selectedGuildId = ids.find((id) => guilds[id]?.queue) || ids[0];
       localStorage.setItem('nobu_guild_id', selectedGuildId);
     }
@@ -619,14 +631,23 @@ if (isConfigPlaceholder()) {
   function renderSelectors(guild) {
     const guildSelect = el('guild-select');
     const guilds = latestState?.guilds || {};
-    const ids = Object.keys(guilds);
+    const ids = getAuthorizedGuildIds();
 
     const prevGuild = guildSelect.value;
     guildSelect.innerHTML = '';
+
+    if (ids.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No shared Discord servers';
+      guildSelect.appendChild(opt);
+      return;
+    }
+
     ids.forEach((id) => {
       const opt = document.createElement('option');
       opt.value = id;
-      opt.textContent = guilds[id].name || id;
+      opt.textContent = guilds[id]?.name || id;
       guildSelect.appendChild(opt);
     });
     if (selectedGuildId && ids.includes(selectedGuildId)) {
@@ -751,6 +772,20 @@ if (isConfigPlaceholder()) {
 
   function renderPlayer() {
     renderBotHeader();
+
+    const authorizedIds = getAuthorizedGuildIds();
+    if (authorizedIds.length === 0) {
+      el('guild-select').innerHTML = '<option value="">No shared Discord servers</option>';
+      el('voice-channel-select').innerHTML = '<option value="">No channels available</option>';
+      el('vc-badge').textContent = 'No shared server';
+      el('idle-state').classList.remove('hidden');
+      el('active-player').classList.add('hidden');
+      const titleEl = document.querySelector('.idle-title');
+      if (titleEl) titleEl.textContent = 'No shared Discord servers with Nobu';
+      renderQueueList(null);
+      return;
+    }
+
     const guild = getSelectedGuild();
     renderSelectors(guild);
 
