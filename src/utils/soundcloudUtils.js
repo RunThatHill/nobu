@@ -112,12 +112,24 @@ function scoreSoundCloudCandidate(candidate, query, meta = {}) {
     }
   }
 
+  const cleanQueryTokens = queryLower
+    .split(/[^a-z0-9\u0600-\u06FF]+/u)
+    .filter((tok) => tok.length >= 2 && (!artistLower || !artistLower.includes(tok)));
+
+  const matchesTitleToken =
+    cleanQueryTokens.length === 0 ||
+    cleanQueryTokens.some((tok) => titleLower.includes(tok));
+
+  if (!matchesTitleToken) {
+    score -= 600;
+  }
+
   const exactDuration = expectedDuration > 45 ? Math.abs(duration - expectedDuration) <= 25 : duration > 45;
   return {
     song: candidate,
     score,
     isVariant,
-    isExactMatch: !isVariant && exactDuration,
+    isExactMatch: !isVariant && exactDuration && matchesTitleToken,
   };
 }
 
@@ -185,9 +197,17 @@ async function findPlayableSoundCloudTrack(scPlugin, query, options = {}, meta =
   const scored = candidates
     .filter((c) => c?.url && c.url !== excludeUrl)
     .map((c) => scoreSoundCloudCandidate(c, query, meta))
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      if (meta.expectedDuration > 0 && a.isExactMatch !== b.isExactMatch) {
+        return b.isExactMatch ? 1 : -1;
+      }
+      return b.score - a.score;
+    });
 
   for (const item of scored) {
+    if (meta.expectedDuration > 0 && !item.isExactMatch) {
+      continue;
+    }
     const streamUrl = await getUnencryptedStreamForTrack(scPlugin, item.song.url);
     if (streamUrl) {
       cacheStreamUrl(item.song.url, streamUrl);

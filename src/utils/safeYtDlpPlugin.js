@@ -25,6 +25,8 @@ function cleanJson(url, extraFlags = [], timeoutMs = 12000) {
     '--prefer-free-formats',
     '--skip-download',
     '--simulate',
+    '--extractor-args',
+    'youtube:player_client=android',
     ...extraFlags,
   ];
 
