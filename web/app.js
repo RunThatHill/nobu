@@ -159,8 +159,8 @@ if (isConfigPlaceholder()) {
 
   async function sendCommand(action, payload = {}) {
     if (!currentUser && !currentDiscordUser) return;
-    if (!selectedGuildId && action !== 'refresh') {
-      showToast('No Discord server selected.', false);
+    if (action !== 'refresh' && (!selectedGuildId || getAuthorizedGuildIds().length === 0)) {
+      showToast('You must join a Discord server with Nobu to manage music.', false);
       return;
     }
 
@@ -183,19 +183,24 @@ if (isConfigPlaceholder()) {
   function getAuthorizedGuildIds() {
     const guilds = latestState?.guilds || {};
     const botGuildIds = Object.keys(guilds);
-    const userGuildIds = currentDiscordUser?.guilds || [];
 
-    if (Array.isArray(userGuildIds) && userGuildIds.length > 0) {
-      // Strict Security: Show only servers where Nobu is serving AND the user is a verified member
+    if (currentDiscordUser) {
+      const userGuildIds = Array.isArray(currentDiscordUser.guilds) ? currentDiscordUser.guilds : [];
+      // Strict Security: ONLY return servers where Nobu is serving AND the user is verified to be a member
       return botGuildIds.filter((id) => userGuildIds.includes(id));
     }
-    return botGuildIds;
+
+    return [];
   }
 
   function getSelectedGuild() {
     const guilds = latestState?.guilds || {};
     const ids = getAuthorizedGuildIds();
-    if (ids.length === 0) return null;
+    if (ids.length === 0) {
+      selectedGuildId = '';
+      localStorage.removeItem('nobu_guild_id');
+      return null;
+    }
     if (!selectedGuildId || !ids.includes(selectedGuildId)) {
       selectedGuildId = ids.find((id) => guilds[id]?.queue) || ids[0];
       localStorage.setItem('nobu_guild_id', selectedGuildId);
@@ -993,6 +998,10 @@ if (isConfigPlaceholder()) {
 
   el('play-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (getAuthorizedGuildIds().length === 0) {
+      showToast('You must join a Discord server with Nobu to search or play tracks.', false);
+      return;
+    }
     const queryInput = el('play-query');
     const query = queryInput.value.trim();
     if (!query) return;
