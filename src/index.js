@@ -31,7 +31,8 @@ if (origJoinableDesc?.get) {
     configurable: true,
   });
 }
-const { DisTube, DisTubeError, Events: DisTubeEvents } = require('distube');
+const { DisTube, DisTubeError, Events: DisTubeEvents, Queue } = require('distube');
+const { AudioPlayerStatus } = require('@discordjs/voice');
 const { SpotifyPlugin } = require('@distube/spotify');
 const { SoundCloudPlugin } = require('@distube/soundcloud');
 const { SafeYtDlpPlugin } = require('./utils/safeYtDlpPlugin');
@@ -216,6 +217,72 @@ const ffmpegInfo = resolveFfmpegInfo();
 const ffmpegPath = ffmpegInfo.path;
 logger.info(`Using FFmpeg binary: ${ffmpegPath} (libopus=${ffmpegInfo.hasLibopus})`);
 
+// Patch Queue#jump to prevent DisTube 5's re-entrant deadlock when
+// distube.play(voiceChannel, query, { skip: true }) calls queue.skip() -> queue.jump()
+// while the _taskQueue mutex is already held by distube.play.
+// Also ensures that jumping when the player is idle immediately triggers playback.
+const origQueueJump = Queue.prototype.jump;
+Queue.prototype.jump = async function patchedJump(position = 1, options = {}) {
+  const isInsidePlayTask = Boolean(this._taskQueue?.hasPlayTask && this._taskQueue?.remaining > 0);
+
+  const executeJump = async () => {
+    if (typeof position !== 'number') {
+      throw new DisTubeError('INVALID_TYPE', 'number', position, 'position');
+    }
+    if (!position || position > this.songs.length || -position > this.previousSongs.length) {
+      throw new DisTubeError('NO_SONG_POSITION');
+    }
+    if (position > 0) {
+      if (position >= this.songs.length) {
+        if (this.autoplay) {
+          await this._addRelatedSong();
+        } else {
+          throw new DisTubeError('NO_UP_NEXT');
+        }
+      }
+      const skipped = this.songs.splice(0, position);
+      if (options?.requeue) {
+        this.songs.push(...skipped);
+      } else if (this.options.savePreviousSongs) {
+        this.previousSongs.push(...skipped);
+      } else {
+        this.previousSongs.push(...skipped.map((s) => ({ id: s.id })));
+      }
+    } else if (!this.options.savePreviousSongs) {
+      throw new DisTubeError('DISABLED_OPTION', 'savePreviousSongs');
+    } else {
+      const skipped = this.previousSongs.splice(position);
+      this.songs.unshift(...skipped);
+    }
+
+    const playerStatus = this.voice?.audioPlayer?.state?.status;
+    const isPlayingOrBuffering =
+      playerStatus === AudioPlayerStatus.Playing || playerStatus === AudioPlayerStatus.Buffering;
+
+    if (isPlayingOrBuffering) {
+      this._manualUpdate = true;
+      this.voice.stop();
+    } else {
+      this._manualUpdate = false;
+      if (this.songs.length > 0) {
+        await this.distube.queues.playSong(this);
+      }
+    }
+    return this.songs[0];
+  };
+
+  if (isInsidePlayTask) {
+    return executeJump();
+  }
+
+  await this._taskQueue.queuing();
+  try {
+    return await executeJump();
+  } finally {
+    this._taskQueue.resolve();
+  }
+};
+
 // Initialize DisTube
 const distube = new DisTube(client, {
   plugins,
@@ -317,7 +384,7 @@ if (ffmpegInfo.hasLibopus) {
 
 client.distube = distube;
 client.commands = new Collection();
-const firebaseSync = createFirebaseSync({ client, distube, scPlugin });
+const firebaseSync = createFirebaseSync({ client, distube, scPlugin, ytPlugin });
 
 // Track recent Now Playing messages and per-guild playback diagnostics
 const nowPlayingMessages = new Map();
@@ -412,6 +479,7 @@ loadCommands(commandsPath);
 
 // When a queue is initialized, configure voice player resilience & telemetry
 distube.on(DisTubeEvents.INIT_QUEUE, (queue) => {
+  queue.autoplay = false;
   attachVoiceDiagnostics(queue);
 });
 

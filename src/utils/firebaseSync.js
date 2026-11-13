@@ -72,7 +72,7 @@ function serializeSong(song) {
  * Lightweight, zero-dependency Firebase Realtime Database sync & command bridge.
  * Uses Node's built-in fetch + crypto so Nobu stays well under Discloud's 100 MB RAM cap.
  */
-function createFirebaseSync({ client, distube, scPlugin }) {
+function createFirebaseSync({ client, distube, scPlugin, ytPlugin }) {
   const fb = config.firebase || {};
   const dbUrl = fb.databaseUrl;
   const hasServiceAccount = Boolean(fb.clientEmail && fb.privateKey);
@@ -365,13 +365,16 @@ function createFirebaseSync({ client, distube, scPlugin }) {
     if (action === 'search') {
       const rawQuery = String(cmd.query || '').trim();
       const reqId = String(cmd.reqId || '').trim();
+      const source = String(cmd.source || 'auto').toLowerCase();
       if (!rawQuery) {
         return { ok: false, message: 'Please enter a search query.' };
       }
 
       let results = [];
       try {
-        if (scPlugin) {
+        if (source === 'youtube' && ytPlugin && typeof ytPlugin.searchYouTube === 'function') {
+          results = await ytPlugin.searchYouTube(rawQuery, 8);
+        } else if (scPlugin) {
           const rawResults = await scPlugin.search(rawQuery, 'track', 8);
           if (Array.isArray(rawResults)) {
             results = rawResults
@@ -383,11 +386,22 @@ function createFirebaseSync({ client, distube, scPlugin }) {
                 formattedDuration: r.formattedDuration || (r.duration ? `${Math.round(r.duration)}s` : 'Live'),
                 thumbnail: r.thumbnail || '',
                 uploader: r.uploader?.name || 'SoundCloud',
+                source: 'soundcloud',
               }));
           }
         }
+
+        // If primary search returned no results, try YouTube fallback
+        if (results.length === 0 && source !== 'youtube' && ytPlugin && typeof ytPlugin.searchYouTube === 'function') {
+          results = await ytPlugin.searchYouTube(rawQuery, 8);
+        }
       } catch (searchErr) {
         logger.warn(`[FirebaseSync] Search error: ${searchErr.message}`);
+        if (results.length === 0 && ytPlugin && typeof ytPlugin.searchYouTube === 'function') {
+          try {
+            results = await ytPlugin.searchYouTube(rawQuery, 8);
+          } catch (_) {}
+        }
       }
 
       await rtdbRequest('PUT', '/nobu/searchResults', {

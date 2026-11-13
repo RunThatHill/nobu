@@ -55,7 +55,9 @@ function isPlayableStreamUrl(url) {
   return (
     typeof url === 'string' &&
     url.startsWith('http') &&
-    !url.includes('/cbcs/')
+    !url.includes('/cbcs/') &&
+    !url.includes('preview-media') &&
+    !url.includes('/preview/')
   );
 }
 
@@ -134,7 +136,8 @@ async function getUnencryptedStreamForTrack(scPlugin, trackUrl) {
 
   const transcodings = [...(track?.media?.transcodings || [])].filter((t) => {
     const proto = t?.format?.protocol || '';
-    return !proto.includes('encrypted') && t?.preset !== 'abr_sq';
+    const preset = t?.preset || '';
+    return !proto.includes('encrypted') && preset !== 'abr_sq' && !t?.snipped;
   });
 
   // Sort: progressive mp3 first, then hls mp3, then hls aac (hq before lq)
@@ -301,14 +304,21 @@ function enhanceSoundCloudPlugin(scPlugin, getFallbackPlugin) {
     const directStream = await getUnencryptedStreamForTrack(scPlugin, song.url);
     if (directStream) return directStream;
 
+    const artist = song.uploader?.name || '';
+    const cleanArtist = artist.replace(/official|records|topic/gi, '').trim();
+
     // Fallback 1: Find another unencrypted SoundCloud upload of the same song title
     if (song.name) {
-      logger.warn(`[SoundCloud] "${song.name}" had only DRM/unplayable streams. Searching unencrypted SoundCloud alternative...`);
-      const alt = await findPlayableSoundCloudTrack(scPlugin, song.name, {}, {
+      logger.warn(`[SoundCloud] "${song.name}" had only DRM/preview streams. Searching unencrypted SoundCloud alternative...`);
+      const fallbackQuery = cleanArtist && !song.name.toLowerCase().includes(cleanArtist.toLowerCase())
+        ? `${song.name} ${cleanArtist}`
+        : song.name;
+      const alt = await findPlayableSoundCloudTrack(scPlugin, fallbackQuery, {}, {
         excludeUrl: song.url,
         expectedDuration: song.duration || 0,
+        artistName: cleanArtist,
       });
-      if (alt?.streamUrl) {
+      if (alt?.isExactMatch && alt?.streamUrl) {
         logger.info(`[SoundCloud] Switched to playable alternative: "${alt.song.name}" (${alt.song.url})`);
         return alt.streamUrl;
       }
@@ -318,9 +328,15 @@ function enhanceSoundCloudPlugin(scPlugin, getFallbackPlugin) {
     const ytPlugin = typeof getFallbackPlugin === 'function' ? getFallbackPlugin() : null;
     if (ytPlugin && song.name) {
       try {
-        logger.warn(`[SoundCloud] Attempting YouTube fallback for "${song.name}"...`);
-        const ytDirect = await ytPlugin.getDirectYouTubeStream(`ytsearch:${song.name}`);
-        if (ytDirect?.url) return ytDirect.url;
+        const ytQuery = cleanArtist && !song.name.toLowerCase().includes(cleanArtist.toLowerCase())
+          ? `ytsearch:${cleanArtist} ${song.name}`
+          : `ytsearch:${song.name}`;
+        logger.warn(`[SoundCloud] Attempting YouTube fallback for "${song.name}" (${ytQuery})...`);
+        const ytDirect = await ytPlugin.getDirectYouTubeStream(ytQuery);
+        if (ytDirect?.url) {
+          logger.info(`[SoundCloud] YouTube fallback succeeded: "${ytDirect.title}"`);
+          return ytDirect.url;
+        }
       } catch (ytErr) {
         logger.warn(`[SoundCloud] YouTube fallback failed: ${ytErr.message}`);
       }

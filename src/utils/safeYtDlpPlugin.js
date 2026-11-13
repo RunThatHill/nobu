@@ -197,6 +197,31 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
     throw new DisTubeError('YTDLP_NO_STREAM', `Could not extract audio stream for "${song.name}". YouTube may be blocking datacenter IP requests.`);
   }
 
+  async searchYouTube(query, limit = 8) {
+    try {
+      const data = await cleanJson(`ytsearch${limit}:${query}`, ['--flat-playlist']);
+      const entries = Array.isArray(data?.entries) ? data.entries : (data ? [data] : []);
+      return entries.filter((e) => e && (e.title || e.url)).map((e) => {
+        const sec = Number(e.duration) || 0;
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60);
+        const formatted = sec > 0 ? `${m}:${String(s).padStart(2, '0')}` : 'Live';
+        return {
+          name: e.title || 'Unknown Title',
+          url: e.url && e.url.startsWith('http') ? e.url : (e.id ? `https://www.youtube.com/watch?v=${e.id}` : ''),
+          duration: sec,
+          formattedDuration: formatted,
+          thumbnail: (Array.isArray(e.thumbnails) && e.thumbnails[0]?.url) || e.thumbnail || '',
+          uploader: e.uploader || e.channel || 'YouTube',
+          source: 'youtube',
+        };
+      });
+    } catch (err) {
+      logger.warn(`[SafeYtDlp] YouTube search error: ${err.message}`);
+      return [];
+    }
+  }
+
   getRelatedSongs() {
     return [];
   }
@@ -204,4 +229,5 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
 
 module.exports = {
   SafeYtDlpPlugin,
+  cleanJson,
 };

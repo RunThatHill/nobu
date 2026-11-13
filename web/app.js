@@ -538,7 +538,8 @@ if (isConfigPlaceholder()) {
 
       const sub = document.createElement('span');
       sub.className = 'search-result-sub';
-      sub.textContent = `${track.formattedDuration} • ${track.uploader || 'SoundCloud'}`;
+      const uploaderText = track.uploader ? `${track.uploader} (${track.source || 'audio'})` : (track.source || 'audio');
+      sub.textContent = `${track.formattedDuration} • ${uploaderText}`;
 
       info.append(title, sub);
 
@@ -555,7 +556,7 @@ if (isConfigPlaceholder()) {
         showToast(`Playing "${track.name}" now…`);
         await sendCommand('play', {
           query: track.url,
-          source: 'soundcloud',
+          source: track.source || 'auto',
           voiceChannelId,
           skip: true,
         });
@@ -572,7 +573,7 @@ if (isConfigPlaceholder()) {
         showToast(`Added "${track.name}" to queue`);
         await sendCommand('play', {
           query: track.url,
-          source: 'soundcloud',
+          source: track.source || 'auto',
           voiceChannelId,
           skip: false,
         });
@@ -659,7 +660,7 @@ if (isConfigPlaceholder()) {
       }
     }, 12000);
 
-    showToast(`Searching SoundCloud for "${query}"…`);
+    showToast(`Searching ${sourceLabel} for "${query}"…`);
     await sendCommand('search', { query, source, reqId });
   });
 
