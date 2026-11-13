@@ -975,36 +975,83 @@ client.on(DiscordEvents.MessageCreate, async (message) => {
 let loginError = null;
 let isConnected = false;
 
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
+const webDir = path.resolve(__dirname, '../web');
+
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     return res.end('OK');
   }
 
+  const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const pathname = parsedUrl.pathname;
+
+  // Dedicated JSON diagnostics route or header
+  if (pathname === '/api/status' || (pathname === '/' && req.headers.accept?.includes('application/json'))) {
+    const mem = process.memoryUsage();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(
+      JSON.stringify({
+        status: isConnected ? 'online' : loginError ? 'error' : 'connecting',
+        discordConnected: isConnected,
+        loginError,
+        tokenConfigured: Boolean(config.token && config.token.length > 10),
+        tokenLength: config.token ? config.token.length : 0,
+        botTag: client.user ? client.user.tag : loginError || 'Connecting...',
+        uptimeSeconds: Math.floor(process.uptime()),
+        pingMs: client.ws ? Math.round(client.ws.ping) : null,
+        guildsCount: client.guilds ? client.guilds.cache.size : 0,
+        memoryMB: {
+          rss: Number((mem.rss / 1024 / 1024).toFixed(1)),
+          heapUsed: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
+          heapTotal: Number((mem.heapTotal / 1024 / 1024).toFixed(1)),
+        },
+        ffmpegPath,
+        libopus: ffmpegInfo.hasLibopus,
+        firebaseEnabled: firebaseSync.isEnabled(),
+        timestamp: new Date().toISOString(),
+        diagnostics: Object.fromEntries(playbackDiagnostics),
+        recentLogs,
+      })
+    );
+  }
+
+  // Serve static assets from web/
+  const targetFile = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '');
+  const filePath = path.join(webDir, targetFile);
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = MIME_TYPES[ext] || 'application/octet-stream';
+    res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
+    return fs.createReadStream(filePath).pipe(res);
+  }
+
+  // Default SPA fallback for browser navigation
+  if (req.headers.accept?.includes('text/html')) {
+    const indexPath = path.join(webDir, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+      return fs.createReadStream(indexPath).pipe(res);
+    }
+  }
+
+  // Fallback to JSON status for non-browser clients
   const mem = process.memoryUsage();
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(
     JSON.stringify({
       status: isConnected ? 'online' : loginError ? 'error' : 'connecting',
       discordConnected: isConnected,
-      loginError,
-      tokenConfigured: Boolean(config.token && config.token.length > 10),
-      tokenLength: config.token ? config.token.length : 0,
-      botTag: client.user ? client.user.tag : loginError || 'Connecting...',
       uptimeSeconds: Math.floor(process.uptime()),
-      pingMs: client.ws ? Math.round(client.ws.ping) : null,
-      guildsCount: client.guilds ? client.guilds.cache.size : 0,
-      memoryMB: {
-        rss: Number((mem.rss / 1024 / 1024).toFixed(1)),
-        heapUsed: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
-        heapTotal: Number((mem.heapTotal / 1024 / 1024).toFixed(1)),
-      },
-      ffmpegPath,
-      libopus: ffmpegInfo.hasLibopus,
-      firebaseEnabled: firebaseSync.isEnabled(),
-      timestamp: new Date().toISOString(),
-      diagnostics: Object.fromEntries(playbackDiagnostics),
-      recentLogs,
     })
   );
 });

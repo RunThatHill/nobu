@@ -215,7 +215,7 @@ function createFirebaseSync({ client, distube, scPlugin, ytPlugin }) {
         songsCount: queue.songs.length,
         totalFormattedDuration: queue.formattedDuration || '00:00',
         currentSong: serializeSong(currentSong),
-        upcoming: queue.songs.slice(1, 16).map((song, idx) => ({
+        upcoming: queue.songs.slice(1, 201).map((song, idx) => ({
           index: idx + 1,
           ...serializeSong(song),
         })),

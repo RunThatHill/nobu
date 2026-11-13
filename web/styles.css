@@ -16,6 +16,32 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+/* Global Modern Sleek Scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 body {
@@ -519,12 +545,36 @@ select:focus {
 .search-results-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 6px 0 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   max-height: 440px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(88, 101, 242, 0.45) rgba(255, 255, 255, 0.03);
+}
+
+.search-results-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.search-results-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 999px;
+  margin: 4px 0;
+}
+
+.search-results-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(88, 101, 242, 0.6), rgba(168, 85, 247, 0.6));
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+
+.search-results-list::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #5865f2, #a855f7);
 }
 
 .search-result-item {
@@ -807,12 +857,36 @@ select:focus {
 .queue-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 6px 0 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 540px;
+  max-height: 560px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(88, 101, 242, 0.45) rgba(255, 255, 255, 0.03);
+}
+
+.queue-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.queue-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 999px;
+  margin: 4px 0;
+}
+
+.queue-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(88, 101, 242, 0.6), rgba(168, 85, 247, 0.6));
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+
+.queue-list::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #5865f2, #a855f7);
 }
 
 .queue-item {
@@ -823,11 +897,13 @@ select:focus {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
 .queue-item:hover {
-  border-color: var(--border);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(88, 101, 242, 0.35);
+  background: rgba(255, 255, 255, 0.07);
+  transform: translateX(2px);
 }
 
 .queue-pos {

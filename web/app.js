@@ -237,7 +237,11 @@ if (isConfigPlaceholder()) {
       return;
     }
 
-    summary.textContent = `${totalCount} tracks total (${upcoming.length} shown up next) • ${queue.totalFormattedDuration || ''}`;
+    if (upcoming.length >= totalCount - 1) {
+      summary.textContent = `${totalCount} tracks total • ${queue.totalFormattedDuration || ''}`;
+    } else {
+      summary.textContent = `${totalCount} tracks total (${upcoming.length} shown up next) • ${queue.totalFormattedDuration || ''}`;
+    }
     empty.classList.add('hidden');
     clearBtn.classList.remove('hidden');
 
