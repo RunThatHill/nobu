@@ -62,9 +62,11 @@ function isPlayableStreamUrl(url) {
 }
 
 function scoreSoundCloudCandidate(candidate, query, meta = {}) {
-  const titleLower = (candidate?.name || '').toLowerCase();
-  const uploaderLower = (candidate?.uploader?.name || '').toLowerCase();
-  const queryLower = (query || '').toLowerCase();
+  const titleLower = (candidate?.name || '').toLowerCase().trim();
+  const uploaderLower = (candidate?.uploader?.name || '').toLowerCase().trim();
+  const queryLower = (query || '').toLowerCase().trim();
+  const cleanTitle = titleLower.replace(/[|–—\-_].*$/g, '').trim();
+  const cleanQuery = queryLower.replace(/[|–—\-_].*$/g, '').trim();
   const expectedDuration = Number(meta.expectedDuration || 0);
   const artistLower = (meta.artistName || '').split(',')[0].trim().toLowerCase();
   const duration = Number(candidate?.duration || 0);
@@ -85,15 +87,21 @@ function scoreSoundCloudCandidate(candidate, query, meta = {}) {
     score -= 800;
   }
 
-  // Filter 30s Go+ previews and match Spotify duration when known
+  // Filter 30s Go+ previews and match Spotify duration when known (up to 45s tolerance)
   if (duration > 0 && duration <= 45 && (expectedDuration === 0 || expectedDuration > 55)) {
     score -= 5000;
   } else if (expectedDuration > 45 && duration > 0) {
     const diff = Math.abs(duration - expectedDuration);
-    if (diff <= 8) score += 150;
-    else if (diff <= 20) score += 90;
-    else if (diff <= 40) score += 25;
-    else if (diff > 60) score -= 350;
+    if (diff <= 10) score += 150;
+    else if (diff <= 25) score += 100;
+    else if (diff <= 45) score += 60;
+    else if (diff > 75) score -= 350;
+  }
+
+  // Reward exact title matches (e.g. "Tayer" vs "Mohamed Mounir - Ya Teir Ya Tayer")
+  const isExactTitle = cleanTitle === cleanQuery || titleLower === queryLower;
+  if (isExactTitle) {
+    score += 2000;
   }
 
   // Reward artist & title alignment
@@ -124,12 +132,12 @@ function scoreSoundCloudCandidate(candidate, query, meta = {}) {
     score -= 600;
   }
 
-  const exactDuration = expectedDuration > 45 ? Math.abs(duration - expectedDuration) <= 25 : duration > 45;
+  const exactDuration = expectedDuration > 45 ? Math.abs(duration - expectedDuration) <= 45 : duration > 45;
   return {
     song: candidate,
     score,
     isVariant,
-    isExactMatch: !isVariant && exactDuration && matchesTitleToken,
+    isExactMatch: !isVariant && exactDuration && (isExactTitle || matchesTitleToken),
   };
 }
 
@@ -333,11 +341,21 @@ function enhanceSoundCloudPlugin(scPlugin, getFallbackPlugin) {
       const fallbackQuery = cleanArtist && !song.name.toLowerCase().includes(cleanArtist.toLowerCase())
         ? `${song.name} ${cleanArtist}`
         : song.name;
-      const alt = await findPlayableSoundCloudTrack(scPlugin, fallbackQuery, {}, {
+      let alt = await findPlayableSoundCloudTrack(scPlugin, fallbackQuery, {}, {
         excludeUrl: song.url,
         expectedDuration: song.duration || 0,
         artistName: cleanArtist,
       });
+
+      // If searching with artist didn't find an exact match, search by song name directly
+      if (!alt?.isExactMatch && fallbackQuery !== song.name) {
+        alt = await findPlayableSoundCloudTrack(scPlugin, song.name, {}, {
+          excludeUrl: song.url,
+          expectedDuration: song.duration || 0,
+          artistName: cleanArtist,
+        });
+      }
+
       if (alt?.isExactMatch && alt?.streamUrl) {
         logger.info(`[SoundCloud] Switched to playable alternative: "${alt.song.name}" (${alt.song.url})`);
         return alt.streamUrl;

@@ -66,7 +66,12 @@ class OggOpusStream extends EventEmitter {
     delete globalArgs.threads;
     delete globalArgs.probesize;
     pushArgsFromMap(ffArgs, globalArgs);
-    pushArgsFromMap(ffArgs, args.input);
+
+    const inputArgs = { ...(args.input || {}) };
+    if (resolvedUrl && resolvedUrl.includes('googlevideo.com')) {
+      delete inputArgs.user_agent;
+    }
+    pushArgsFromMap(ffArgs, inputArgs);
 
     if (this.seekTime > 0) {
       ffArgs.push('-ss', String(this.seekTime));
