@@ -160,13 +160,29 @@ async function getUnencryptedStreamForTrack(scPlugin, trackUrl) {
     return !proto.includes('encrypted') && preset !== 'abr_sq' && !t?.snipped;
   });
 
-  // Sort: progressive mp3 first, then hls mp3, then hls aac (hq before lq)
+  // Sort: High-Definition HQ AAC / Opus streams first, then standard HLS, then progressive MP3
   transcodings.sort((a, b) => {
     const score = (t) => {
       let s = 0;
-      if (t.format?.protocol === 'progressive') s += 100;
-      if (t.format?.mime_type?.includes('mpeg')) s += 20;
-      if (t.quality === 'hq' || t.quality === 'sq') s += 5;
+      const mime = (t.format?.mime_type || '').toLowerCase();
+      const preset = (t.preset || '').toLowerCase();
+      const quality = (t.quality || '').toLowerCase();
+      const protocol = (t.format?.protocol || '').toLowerCase();
+
+      // 1. High-definition / Studio quality tier (SoundCloud HQ)
+      if (quality === 'hq') s += 250;
+      if (preset.includes('256k') || preset.includes('320k')) s += 200;
+      if (preset.includes('160k')) s += 150;
+
+      // 2. Modern audio codecs (Opus > AAC/MP4 > MP3)
+      if (mime.includes('opus') || preset.includes('opus')) s += 120;
+      else if (mime.includes('mp4') || mime.includes('aac') || preset.includes('aac')) s += 100;
+      else if (mime.includes('mpeg') || preset.includes('mp3')) s += 30;
+
+      // 3. Reliable protocols (HLS is natively handled by FFmpeg; progressive fallback)
+      if (protocol === 'hls') s += 20;
+      else if (protocol === 'progressive') s += 15;
+
       return s;
     };
     return score(b) - score(a);

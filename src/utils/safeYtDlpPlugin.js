@@ -150,7 +150,7 @@ class SafeYtDlpPlugin extends PlayableExtractorPlugin {
   }
 
   async getDirectYouTubeStream(queryOrUrl) {
-    const info = await cleanJson(queryOrUrl, ['-f', 'ba/ba*']);
+    const info = await cleanJson(queryOrUrl, ['--format-sort', 'abr,asr', '-f', 'ba/ba*']);
     const entry = Array.isArray(info?.entries) ? info.entries[0] : info;
     if (entry && entry.url) {
       return {

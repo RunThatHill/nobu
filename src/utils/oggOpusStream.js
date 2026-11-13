@@ -93,11 +93,16 @@ class OggOpusStream extends EventEmitter {
     }
     pushArgsFromMap(ffArgs, outputArgs);
 
+    const opusBitrate = process.env.OPUS_BITRATE || '192k';
+
     ffArgs.push(
       '-vn',
       '-acodec', 'libopus',
-      '-b:a', '64k',
+      '-b:a', opusBitrate,
       '-vbr', 'on',
+      '-compression_level', '10',
+      '-application', 'audio',
+      '-cutoff', '20000',
       '-frame_duration', '20',
       '-ar', '48000',
       '-ac', '2',
@@ -107,7 +112,7 @@ class OggOpusStream extends EventEmitter {
 
     this.#opts = ffArgs;
     this.process = null;
-    this.stream = new PassThrough({ highWaterMark: 16384 });
+    this.stream = new PassThrough({ highWaterMark: 65536 });
     this.stream
       .on('close', () => this.kill())
       .on('error', (err) => {

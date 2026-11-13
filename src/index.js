@@ -481,6 +481,12 @@ loadCommands(commandsPath);
 distube.on(DisTubeEvents.INIT_QUEUE, (queue) => {
   queue.autoplay = false;
   attachVoiceDiagnostics(queue);
+
+  // Auto-optimize voice channel bitrate to server maximum if bot has permissions
+  const vc = queue.voiceChannel;
+  if (vc?.guild?.maximumBitrate && vc.manageable && vc.bitrate < vc.guild.maximumBitrate) {
+    vc.setBitrate(vc.guild.maximumBitrate, 'Nobu Studio Audio Quality').catch(() => {});
+  }
 });
 
 // When a song starts playing

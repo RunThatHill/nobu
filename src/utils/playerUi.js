@@ -79,10 +79,15 @@ function createNowPlayingEmbed(song, queue) {
         name: '📑 In Queue',
         value: `\`${queue.songs.length} song${queue.songs.length === 1 ? '' : 's'}\``,
         inline: true,
+      },
+      {
+        name: '✨ Audio Quality',
+        value: '`192 kbps Studio Opus (HD)`',
+        inline: true,
       }
     )
     .setFooter({
-      text: 'Nobu Music • Use the buttons below or slash commands to control playback',
+      text: 'Nobu Studio Audio • 192 kbps Opus • 48 kHz Stereo',
     })
     .setTimestamp();
 

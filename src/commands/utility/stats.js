@@ -63,6 +63,11 @@ module.exports = {
           name: '⚙️ Platform / Node',
           value: `\`${os.platform()} (${os.arch()})\`\n\`Node ${process.version}\`\n\`discord.js v${djsVersion}\``,
           inline: true,
+        },
+        {
+          name: '🎧 Audio Engine',
+          value: '`192 kbps VBR Studio Opus`\n`Complexity 10 • 48 kHz Stereo`',
+          inline: true,
         }
       )
       .setTimestamp();
