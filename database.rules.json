@@ -4,22 +4,32 @@
     ".write": false,
     "nobu": {
       "state": {
-        ".read": "auth != null && auth.token.email_verified == true && (auth.token.email == 'abdelmassehmourad@gmail.com')",
+        ".read": "auth != null",
         ".write": false
       },
       "lastResult": {
-        ".read": "auth != null && auth.token.email_verified == true && (auth.token.email == 'abdelmassehmourad@gmail.com')",
+        ".read": "auth != null",
         ".write": false
       },
       "searchResults": {
-        ".read": "auth != null && auth.token.email_verified == true && (auth.token.email == 'abdelmassehmourad@gmail.com')",
+        ".read": "auth != null",
         ".write": false
       },
       "commands": {
-        ".read": "auth != null && auth.token.email_verified == true && (auth.token.email == 'abdelmassehmourad@gmail.com')",
-        ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'abdelmassehmourad@gmail.com')",
+        ".read": "auth != null",
+        ".write": "auth != null",
         "$cmdId": {
-          ".validate": "newData.hasChildren(['action', 'createdAt', 'userEmail']) && newData.child('userEmail').val() == auth.token.email"
+          ".validate": "newData.hasChildren(['action', 'createdAt'])"
+        }
+      },
+      "users": {
+        "$userId": {
+          ".read": "auth != null && (auth.uid == $userId || auth.uid == 'discord:' + $userId)",
+          ".write": "auth != null && (auth.uid == $userId || auth.uid == 'discord:' + $userId)",
+          "playlists": {
+            ".read": "auth != null && (auth.uid == $userId || auth.uid == 'discord:' + $userId)",
+            ".write": "auth != null && (auth.uid == $userId || auth.uid == 'discord:' + $userId)"
+          }
         }
       }
     }

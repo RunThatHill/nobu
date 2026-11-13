@@ -9,8 +9,12 @@ export const FIREBASE_CONFIG = {
   appId: '1:765762665190:web:0fabc1a5e4d5168047d927',
 };
 
-// Optional frontend allowlist (also enforced in database.rules.json and bot .env).
-// Leave empty to rely on database.rules.json, or list allowed Gmail addresses here.
+// Discord OAuth2 Configuration
+export const DISCORD_CONFIG = {
+  clientId: '1568741400126693467',
+  railwayApiUrl: 'https://nobu-production-943fc9a4.up.railway.app',
+};
+
 export const ALLOWED_EMAILS = [
   'abdelmassehmourad@gmail.com',
 ];

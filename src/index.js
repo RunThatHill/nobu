@@ -52,6 +52,7 @@ const { getMemberVoiceChannel } = require('./utils/voiceUtils');
 const { OggOpusStream } = require('./utils/oggOpusStream');
 const { enhanceSoundCloudPlugin, resolvePlayQuery, resolveSpotifyTrackStream } = require('./utils/soundcloudUtils');
 const { createFirebaseSync } = require('./utils/firebaseSync');
+const { getDiscordAuthUrl, exchangeCodeForUser } = require('./utils/discordAuth');
 
 // Validate environment variables
 const validation = validateConfig();
@@ -994,6 +995,59 @@ const server = http.createServer((req, res) => {
 
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
+
+  // Discord OAuth2 Login initiation
+  if (pathname === '/api/auth/discord/login') {
+    const returnUrl = parsedUrl.searchParams.get('returnUrl') || 'https://nobu-181df.web.app';
+    const authUrl = getDiscordAuthUrl(req, returnUrl);
+    res.writeHead(302, { Location: authUrl });
+    return res.end();
+  }
+
+  // Discord OAuth2 Callback
+  if (pathname === '/api/auth/discord/callback') {
+    const code = parsedUrl.searchParams.get('code');
+    const state = parsedUrl.searchParams.get('state');
+    const oauthError = parsedUrl.searchParams.get('error_description') || parsedUrl.searchParams.get('error');
+
+    let returnUrl = 'https://nobu-181df.web.app';
+    try {
+      if (state) {
+        const decoded = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
+        if (decoded.returnUrl) returnUrl = decoded.returnUrl;
+      }
+    } catch (_) {}
+
+    if (oauthError || !code) {
+      logger.warn(`[DiscordAuth] OAuth callback error: ${oauthError || 'missing_code'}`);
+      const errTarget = `${returnUrl}#error=${encodeURIComponent(oauthError || 'Access denied by user')}`;
+      res.writeHead(302, { Location: errTarget });
+      return res.end();
+    }
+
+    exchangeCodeForUser(req, code, state)
+      .then((data) => {
+        const hashParams = new URLSearchParams({
+          custom_token: data.customToken || '',
+          discord_id: data.user.id,
+          username: data.user.username,
+          global_name: data.user.globalName,
+          avatar: data.user.avatar || '',
+          avatar_url: data.user.avatarUrl || '',
+          guilds: (data.guildIds || []).join(','),
+        });
+        const target = `${data.returnUrl}#${hashParams.toString()}`;
+        res.writeHead(302, { Location: target });
+        res.end();
+      })
+      .catch((err) => {
+        logger.error('[DiscordAuth] Failed to complete Discord OAuth:', err);
+        const errTarget = `${returnUrl}#error=${encodeURIComponent(err.message || 'Authentication failed')}`;
+        res.writeHead(302, { Location: errTarget });
+        res.end();
+      });
+    return;
+  }
 
   // Dedicated JSON diagnostics route or header
   if (pathname === '/api/status' || (pathname === '/' && req.headers.accept?.includes('application/json'))) {

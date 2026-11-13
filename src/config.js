@@ -19,6 +19,7 @@ const config = {
   // Discord Bot
   token: (process.env.DISCORD_TOKEN || '').trim().replace(/^["']|["']$/g, ''),
   clientId: (process.env.CLIENT_ID || '').trim().replace(/^["']|["']$/g, ''),
+  clientSecret: (process.env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, ''),
   guildId: process.env.GUILD_ID || '', // Optional: Instant registration for testing
   prefix: process.env.BOT_PREFIX || '!',
   defaultVolume: parseInt(process.env.DEFAULT_VOLUME || '50', 10),

@@ -435,13 +435,59 @@ function createFirebaseSync({ client, distube, scPlugin, ytPlugin }) {
       const source = String(cmd.source || 'auto');
       const query = await resolvePlayQuery(scPlugin, rawQuery, source);
       const textChannel = findSendableTextChannel(guild, queue);
-      const playOpts = { textChannel };
+      const member = cmd.discordUserId ? (guild.members.cache.get(cmd.discordUserId) || await guild.members.fetch(cmd.discordUserId).catch(() => null)) : undefined;
+
+      const playOpts = { textChannel, member };
       if (cmd.skip === true) {
         playOpts.skip = true;
       }
 
       await distube.play(voiceChannel, query, playOpts);
       return { ok: true, message: `${cmd.skip ? 'Playing' : 'Queued'} "${rawQuery}" in #${voiceChannel.name}` };
+    }
+
+    if (action === 'playPlaylist') {
+      const tracks = Array.isArray(cmd.tracks) ? cmd.tracks : [];
+      if (tracks.length === 0) {
+        return { ok: false, message: 'This playlist has no tracks to play.' };
+      }
+
+      const voiceChannel = findVoiceChannelForPlay(guild, cmd.voiceChannelId);
+      if (!voiceChannel) {
+        return { ok: false, message: 'No joinable voice channel found in this server.' };
+      }
+
+      const textChannel = findSendableTextChannel(guild, queue);
+      const member = cmd.discordUserId ? (guild.members.cache.get(cmd.discordUserId) || await guild.members.fetch(cmd.discordUserId).catch(() => null)) : undefined;
+
+      // Start playing the first track immediately
+      const first = tracks[0];
+      const firstQuery = await resolvePlayQuery(scPlugin, first.url || first.name, first.source || 'auto');
+      await distube.play(voiceChannel, firstQuery, {
+        textChannel,
+        skip: Boolean(cmd.skip),
+        member,
+      });
+
+      // Queue the remaining tracks asynchronously
+      if (tracks.length > 1) {
+        (async () => {
+          for (let i = 1; i < tracks.length; i++) {
+            try {
+              const t = tracks[i];
+              const q = await resolvePlayQuery(scPlugin, t.url || t.name, t.source || 'auto');
+              await distube.play(voiceChannel, q, { textChannel, skip: false, member });
+            } catch (err) {
+              logger.warn(`[FirebaseSync] Error queueing playlist track #${i + 1}: ${err.message}`);
+            }
+          }
+        })().catch(() => {});
+      }
+
+      return {
+        ok: true,
+        message: `Queued playlist "${cmd.playlistName || 'Playlist'}" (${tracks.length} tracks) in #${voiceChannel.name}`,
+      };
     }
 
     if (!queue || !queue.songs || queue.songs.length === 0) {
@@ -591,11 +637,13 @@ function createFirebaseSync({ client, distube, scPlugin, ytPlugin }) {
         return;
       }
 
-      if (fb.allowedEmails.length > 0) {
+      // Authorize command: Allow all Discord-authenticated users, or legacy Google allowlist
+      const isDiscordAuth = Boolean(cmd.discordUserId);
+      if (!isDiscordAuth && fb.allowedEmails.length > 0) {
         const email = String(cmd.userEmail || '').trim().toLowerCase();
         if (!email || !fb.allowedEmails.includes(email)) {
           logger.warn(`[FirebaseSync] Rejected command "${cmd.action}" from unauthorized email: ${email || 'none'}`);
-          await publishCommandResult(cmdId, cmd.action, false, 'Unauthorized Google account.', cmd.guildId);
+          await publishCommandResult(cmdId, cmd.action, false, 'Unauthorized account.', cmd.guildId);
           await rtdbRequest('DELETE', `/nobu/commands/${cmdId}`).catch(() => {});
           return;
         }
